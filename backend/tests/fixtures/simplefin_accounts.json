@@ -1,0 +1,75 @@
+{
+  "errors": ["Connection to Robinhood may need attention"],
+  "accounts": [
+    {
+      "org": {"domain": "chase.com", "name": "Chase", "sfin-url": "https://sfin.example.com"},
+      "id": "ACT-checking-1",
+      "name": "Total Checking",
+      "currency": "USD",
+      "balance": "2534.17",
+      "available-balance": "2500.00",
+      "balance-date": 1759900000,
+      "transactions": [
+        {
+          "id": "TRN-1",
+          "posted": 1759800000,
+          "amount": "-45.67",
+          "description": "WHOLEFDS #123",
+          "payee": "Whole Foods",
+          "memo": "",
+          "transacted_at": 1759750000
+        },
+        {
+          "id": "TRN-2",
+          "posted": 1759700000,
+          "amount": "3200.00",
+          "description": "ACME CORP PAYROLL",
+          "payee": "Acme Corp"
+        },
+        {
+          "id": "TRN-PENDING-1",
+          "posted": 0,
+          "amount": "-12.50",
+          "description": "UBER *TRIP",
+          "pending": true,
+          "transacted_at": 1759880000
+        }
+      ]
+    },
+    {
+      "org": {"domain": "americanexpress.com", "name": "American Express"},
+      "id": "ACT-card-1",
+      "name": "Gold Card",
+      "currency": "USD",
+      "balance": "-812.40",
+      "balance-date": 1759900000,
+      "transactions": [
+        {
+          "id": "TRN-3",
+          "posted": 1759600000,
+          "amount": "-89.99",
+          "description": "AMAZON MKTPLACE"
+        }
+      ]
+    },
+    {
+      "org": {"domain": "robinhood.com", "name": "Robinhood"},
+      "id": "ACT-invest-1",
+      "name": "Individual",
+      "currency": "USD",
+      "balance": "15432.10",
+      "balance-date": 1759900000,
+      "transactions": [],
+      "holdings": [
+        {
+          "id": "H-1",
+          "symbol": "VTI",
+          "description": "Vanguard Total Stock Market ETF",
+          "shares": "40.5",
+          "market_value": "11021.33",
+          "cost_basis": "9000.00"
+        }
+      ]
+    }
+  ]
+}

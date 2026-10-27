@@ -1,0 +1,60 @@
+# Backend project metadata, dependencies and tool settings (uv, pytest, ruff).
+# Install for development from backend/: `uv venv .venv && uv sync --active`.
+
+[project]
+name = "fintrack-backend"
+version = "0.1.0"
+description = "FinTrack API: a self-hosted household finance tracker"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "alembic>=1.14",
+    "apscheduler>=3.10,<4",
+    "argon2-cffi>=23.1",
+    "cryptography>=43",
+    "email-validator>=2.2",
+    "fastapi>=0.115",
+    "httpx>=0.28",
+    "pydantic-settings>=2.6",
+    "sqlalchemy>=2.0.36",
+    "typer>=0.15",
+    "uvicorn[standard]>=0.32",
+]
+
+# Only needed when DATABASE_URL points at Postgres (the Docker image always includes it).
+[project.optional-dependencies]
+postgres = [
+    "psycopg[binary]>=3.2",
+]
+
+[project.scripts]
+fintrack = "app.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["B008"]  # FastAPI's Depends() in defaults is idiomatic
+
+[tool.ruff.lint.isort]
+known-third-party = ["alembic"]  # the local alembic/ folder is migrations, not a package

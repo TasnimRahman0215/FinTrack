@@ -1,0 +1,65 @@
+# FinTrack: `docker compose up -d`, then open http://localhost:3000
+# First time: cp backend/.env.example backend/.env and fill SECRET_KEY / ENCRYPTION_KEY
+#   (generate them with: docker compose run --rm backend fintrack gen-keys)
+
+services:
+  backend:
+    build: ./backend
+    image: fintrack-backend:local
+    env_file: backend/.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/fintrack.db}
+    volumes:
+      - fintrack-data:/data
+    ports:
+      # Only this machine can reach the API directly; everyone else goes through the frontend.
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    image: fintrack-frontend:local
+    environment:
+      BACKEND_URL: http://backend:8000
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Optional Postgres instead of SQLite:
+  #   docker compose --profile postgres up -d
+  #   and set DATABASE_URL=postgresql+psycopg://fintrack:fintrack@postgres:5432/fintrack in .env
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: fintrack
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintrack}
+      POSTGRES_DB: fintrack
+    volumes:
+      - fintrack-pg:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # Optional separate scheduler. If you use it, set RUN_SCHEDULER=false in backend/.env
+  # (the worker sets it to true for itself). Run only one scheduler per database.
+  worker:
+    image: fintrack-backend:local
+    profiles: ["worker"]
+    env_file: backend/.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/fintrack.db}
+      RUN_SCHEDULER: "true"
+    command: ["python", "-m", "app.worker"]
+    volumes:
+      - fintrack-data:/data
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+# Named volumes persist data across rebuilds. fintrack-data holds the SQLite database: back it up.
+volumes:
+  fintrack-data:
+  fintrack-pg:
