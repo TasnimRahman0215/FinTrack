@@ -1,13 +1,13 @@
 # FinTrack
 
-A simple, self-hosted personal finance tracker for a household, in the spirit of Monarch.
+A simple, self-hosted personal finance tracker for a household.
 Connect bank, credit card and brokerage accounts through [SimpleFIN Bridge](https://beta-bridge.simplefin.org),
 then see **your own** finances, **another member's** shared finances, or the **whole household** together.
 
 - Runs anywhere Docker runs (home server, Raspberry Pi, a free cloud VM); your data stays on your machine
 - Works on phone and desktop in the browser
 - Read-only: FinTrack can never move money
-- The only cost is SimpleFIN Bridge (about $15/year)
+- The only cost is SimpleFIN Bridge ($15/year)
 
 ## Status
 
