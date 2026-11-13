@@ -8,8 +8,13 @@ and how to add a feature without fighting it.
 - **Money is integer cents** everywhere (`amount_cents`, `balance_cents`). Never floats.
 - **Datetimes are naive UTC** in the database (`app/core/clock.py`).
 - **Privacy is decided in one place:** `backend/app/core/scope.py`. Every endpoint that returns
-  financial data must take the `get_scope` dependency and filter by `scope.account_ids`.
-- **Writes need a role:** use `Depends(require_role(Role.CONTRIBUTOR))` (or `OWNER`).
+  financial data must take the `get_scope` dependency and filter by `scope.account_ids`. Anything
+  that summarises accounts from another angle (connections, sync history, counts, labels, error
+  text) must also only describe accounts the viewer may see (`scope.visible_to`).
+- **Writes need a role:** use `Depends(require_role(Role.CONTRIBUTOR))` (or `OWNER`), and for a
+  specific account `account_service.get_editable_account` (who may edit *this* account).
+- **Permissions are computed by the API**, never re-derived in the frontend: responses carry flags
+  such as `can_edit`, `can_reassign`, `can_manage` and `editable`.
 - **Sync never overwrites user fields.** Provider columns (name, balance, description...) are refreshed;
   user columns (display_name, kind, owner, visibility, notes...) are not.
 - **Schema changes go through Alembic.** People run this on their own data, so never edit an existing migration.

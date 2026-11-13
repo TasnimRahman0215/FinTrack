@@ -5,8 +5,6 @@ from typing import Annotated
 
 from pydantic import BaseModel, StringConstraints
 
-from app.schemas.common import ORMModel
-
 
 class ConnectionCreate(BaseModel):
     """The SimpleFIN setup token (or an access URL) pasted in Settings."""
@@ -16,8 +14,12 @@ class ConnectionCreate(BaseModel):
     ]
 
 
-class ConnectionOut(ORMModel):
-    """A connection as shown in Settings. The encrypted credentials are never included."""
+class ConnectionOut(BaseModel):
+    """A connection as shown in Settings. The encrypted credentials are never included.
+
+    `label`, `account_count` and `last_error` only describe accounts the viewer may see, so they
+    never reveal another member's private accounts (see connection_service.to_out).
+    """
 
     id: int
     provider: str
@@ -28,3 +30,5 @@ class ConnectionOut(ORMModel):
     last_error: str | None
     created_at: datetime
     account_count: int = 0
+    syncing: bool = False  # a sync is running right now
+    can_manage: bool = False  # the viewer may remove it and see its full sync details

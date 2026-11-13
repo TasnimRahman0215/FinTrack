@@ -8,9 +8,10 @@ import { accountsApi } from '../../api/accounts'
 import { useScope } from '../../context/ScopeContext'
 import { FINANCIAL_DATA_KEYS, queryKeys } from '../../lib/queryKeys'
 
-/** Accounts in the current scope. */
-export function useAccounts({ includeHidden = false } = {}) {
-  const { scope } = useScope()
+/** Accounts in the current scope (or in `scope`, when given). */
+export function useAccounts({ includeHidden = false, scope: fixedScope } = {}) {
+  const { scope: currentScope } = useScope()
+  const scope = fixedScope ?? currentScope
   return useQuery({
     queryKey: queryKeys.accounts(scope, { includeHidden }),
     queryFn: () => accountsApi.list({ scope, includeHidden }),

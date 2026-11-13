@@ -18,7 +18,7 @@ from app.services import account_service
 from app.services.auth_service import AuthContext
 
 
-def to_out(txn: Transaction, account: Account) -> TransactionOut:
+def to_out(txn: Transaction, account: Account, ctx: AuthContext) -> TransactionOut:
     """API shape of a transaction, including its account's name for display."""
     return TransactionOut(
         id=txn.id,
@@ -33,17 +33,23 @@ def to_out(txn: Transaction, account: Account) -> TransactionOut:
         memo=txn.memo,
         notes=txn.notes,
         pending=txn.pending,
-        editable=txn.source == Source.MANUAL,
+        editable=txn.source == Source.MANUAL and account_service.permissions(ctx, account)[0],
     )
 
 
 def list_transactions(
-    db: Session, scope: Scope, filters: TransactionFilters, *, cursor: str | None, limit: int
+    db: Session,
+    ctx: AuthContext,
+    scope: Scope,
+    filters: TransactionFilters,
+    *,
+    cursor: str | None,
+    limit: int,
 ) -> Page[TransactionOut]:
     rows, next_cursor = transaction_repo.list_page(
         db, scope.account_ids, filters, cursor=cursor, limit=limit
     )
-    return Page[TransactionOut](items=[to_out(t, a) for t, a in rows], next_cursor=next_cursor)
+    return Page[TransactionOut](items=[to_out(t, a, ctx) for t, a in rows], next_cursor=next_cursor)
 
 
 def create_manual(db: Session, ctx: AuthContext, data: TransactionCreate) -> TransactionOut:
@@ -64,7 +70,7 @@ def create_manual(db: Session, ctx: AuthContext, data: TransactionCreate) -> Tra
     db.flush()
     account_service.recompute_manual_balance(db, account)
     db.commit()
-    return to_out(txn, account)
+    return to_out(txn, account, ctx)
 
 
 def update(db: Session, ctx: AuthContext, txn_id: int, data: TransactionUpdate) -> TransactionOut:
@@ -93,7 +99,7 @@ def update(db: Session, ctx: AuthContext, txn_id: int, data: TransactionUpdate) 
     if old_account.id != account.id:
         account_service.recompute_manual_balance(db, old_account)
     db.commit()
-    return to_out(txn, account)
+    return to_out(txn, account, ctx)
 
 
 def delete(db: Session, ctx: AuthContext, txn_id: int) -> None:
@@ -105,7 +111,7 @@ def delete(db: Session, ctx: AuthContext, txn_id: int) -> None:
 
 
 def _manual_account(db: Session, ctx: AuthContext, account_id: int) -> Account:
-    account = account_service.get_visible_account(db, ctx, account_id)
+    account = account_service.get_editable_account(db, ctx, account_id)
     if account.source != Source.MANUAL:
         # Manual entries in synced accounts would double-count once the bank syncs them.
         raise AppError(
@@ -119,14 +125,13 @@ def _get_editable(db: Session, ctx: AuthContext, txn_id: int) -> tuple[Transacti
     txn = transaction_repo.get(db, txn_id)
     if txn is None:
         raise NotFound("Transaction not found.")
-    account = account_service.get_visible_account(db, ctx, txn.account_id)
+    account = account_service.get_editable_account(db, ctx, txn.account_id)
     if txn.source != Source.MANUAL:
         raise AppError("Synced transactions can't be edited or deleted.", code="not_editable")
     return txn, account
 
 
 def _check_amount(amount_cents: int) -> None:
+    # The size limit is part of the schema (schemas/common.py Cents).
     if amount_cents == 0:
         raise AppError("Amount can't be zero.")
-    if abs(amount_cents) > 10**13:
-        raise AppError("Amount is too large.")

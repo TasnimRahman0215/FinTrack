@@ -4,7 +4,6 @@ import { Button } from '../../components/ui/Button'
 import { Dialog } from '../../components/ui/Dialog'
 import { ErrorMessage } from '../../components/ui/Feedback'
 import { Field, Input } from '../../components/ui/Form'
-import { useAuth } from '../../context/AuthContext'
 import { centsToInput, parseAmountToCents } from '../../lib/money'
 import { KindField, OwnerField, VisibilityField } from './AccountFields'
 import { isJoint, ownerToValue, valueToOwner } from './owner'
@@ -24,12 +23,12 @@ export function AccountEditDialog({ account, onClose }) {
 }
 
 function AccountEditForm({ account, onDone }) {
-  const { user, isOwner } = useAuth()
   const update = useUpdateAccount()
   const remove = useDeleteAccount()
   const isManual = account.source === 'manual'
-  // Mirrors the API rule: only the account's owner (or the household owner) can re-assign it.
-  const canReassign = account.owner_user_id === null || account.owner_user_id === user.id || isOwner
+  // The API says what this user may do (only the account's owner or the household owner can
+  // change who owns it or who can see it).
+  const canReassign = account.can_reassign
 
   const [form, setForm] = useState({
     name: account.name,

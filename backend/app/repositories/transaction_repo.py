@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.models import Account, Transaction
-from app.models.enums import Source
 
 _CHUNK = 500  # keep IN (...) lists well under database parameter limits
 
@@ -131,7 +130,7 @@ def delete_stale_pending(
         for t in db.scalars(
             select(Transaction).where(
                 Transaction.account_id == account_id,
-                Transaction.source == Source.SIMPLEFIN,
+                Transaction.provider_txn_id.is_not(None),  # synced rows, from any provider
                 Transaction.pending.is_(True),
                 Transaction.date >= since,
             )

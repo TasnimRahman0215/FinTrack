@@ -1,8 +1,22 @@
-# Rendered at container start: ${BACKEND_URL} comes from the environment.
+# Rendered at container start: ${BACKEND_URL} and ${CSP_CONNECT_SRC} come from the environment.
+# Runs as an unprivileged user (see Dockerfile), so it listens on 8080 rather than 80.
 server {
-    listen 80;
+    listen 8080;
     server_name _;
     root /usr/share/nginx/html;
+    server_tokens off;
+
+    # Security headers for every response (pages and API). `always` adds them to errors too.
+    # Locations below set caching with `expires` rather than add_header, because any add_header
+    # inside a location would silently drop these server-level ones.
+    # - CSP: the app only loads its own files. connect-src is 'self' unless the API is on another
+    #   origin (set CSP_CONNECT_SRC to "'self' https://api.example.com").
+    # - frame-ancestors / X-Frame-Options: nobody can embed FinTrack to trick clicks.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src ${CSP_CONNECT_SRC}; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "same-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
 
     # API calls go to the backend container (same origin for the browser => cookies just work).
     location /api/ {
@@ -10,20 +24,22 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Overwrite (never append to) X-Forwarded-For: the backend rate-limits logins by this
+        # address, so a client must not be able to supply its own.
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 120s;  # a first sync can take a while
+        proxy_read_timeout 120s;  # connecting a bank claims the token with SimpleFIN first
     }
 
-    # Hashed build assets can be cached forever.
+    # Hashed build assets can be cached for a long time.
     location /assets/ {
-        add_header Cache-Control "public, max-age=31536000, immutable";
+        expires max;
         try_files $uri =404;
     }
 
     # Single-page app: unknown paths serve index.html (never cached, so updates show up).
     location / {
-        add_header Cache-Control "no-cache";
+        expires -1;
         try_files $uri /index.html;
     }
 }

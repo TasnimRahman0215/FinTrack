@@ -1,32 +1,24 @@
-import { useQueries } from '@tanstack/react-query'
 import { useState } from 'react'
 
-import { accountsApi } from '../../api/accounts'
 import { Button } from '../../components/ui/Button'
 import { Dialog } from '../../components/ui/Dialog'
 import { ErrorMessage } from '../../components/ui/Feedback'
 import { Field, Input, Segmented, Select, Textarea } from '../../components/ui/Form'
 import { todayISO } from '../../lib/dates'
 import { centsToInput, parseAmountToCents } from '../../lib/money'
-import { queryKeys } from '../../lib/queryKeys'
+import { useAccounts } from '../accounts/useAccounts'
 import { useCreateTransaction, useDeleteTransaction, useUpdateTransaction } from './useTransactions'
 
 // The add/edit dialog for manual transactions, opened from the Transactions page.
 
 /**
- * Manual accounts the user can add to: their own (incl. private) plus shared/joint ones.
- * Fetched for "me" and "household" regardless of the current scope, then merged.
+ * Manual accounts the user can add to: ones they may edit (their own and joint ones, or any for
+ * the household owner). Those are all in the "me" view, whatever scope the page shows.
  */
 function useManualAccounts() {
-  const results = useQueries({
-    queries: ['me', 'household'].map((scope) => ({
-      queryKey: queryKeys.accounts(scope, { includeHidden: false }),
-      queryFn: () => accountsApi.list({ scope }),
-    })),
-  })
-  const byId = new Map()
-  for (const r of results) for (const a of r.data ?? []) if (a.source === 'manual') byId.set(a.id, a)
-  return { accounts: [...byId.values()], isLoading: results.some((r) => r.isLoading) }
+  const { data, isLoading } = useAccounts({ scope: 'me' })
+  const accounts = (data ?? []).filter((a) => a.source === 'manual' && a.can_edit)
+  return { accounts, isLoading }
 }
 
 /** Add (txn = null) or edit a manual transaction. */

@@ -17,7 +17,7 @@ from app.models.enums import Role
 from app.services import auth_service
 from app.services.auth_service import AuthContext
 
-__all__ = ["get_db", "get_auth", "require_role", "get_scope", "client_ip"]
+__all__ = ["get_db", "get_auth", "require_role", "get_scope", "get_scope_with_hidden", "client_ip"]
 
 
 def get_auth(request: Request, db: Session = Depends(get_db)) -> AuthContext:
@@ -42,15 +42,39 @@ def require_role(minimum: Role) -> Callable[..., AuthContext]:
     return _dependency
 
 
+_SCOPE_QUERY = Query("me", description="me | household | member:<user_id>")
+
+
 def get_scope(
-    scope: str = Query("me", description="me | household | member:<user_id>"),
+    scope: str = _SCOPE_QUERY,
     ctx: AuthContext = Depends(get_auth),
     db: Session = Depends(get_db),
 ) -> Scope:
-    """The accounts visible under `?scope=` (see app/core/scope.py)."""
+    """The (non-hidden) accounts visible under `?scope=` (see app/core/scope.py)."""
     return resolve_scope(db, household_id=ctx.household_id, user_id=ctx.user.id, raw=scope)
 
 
+def get_scope_with_hidden(
+    scope: str = _SCOPE_QUERY,
+    include_hidden: bool = Query(False, description="Also include accounts marked hidden"),
+    ctx: AuthContext = Depends(get_auth),
+    db: Session = Depends(get_db),
+) -> Scope:
+    """Like get_scope, plus `?include_hidden=true` (the Accounts page's "Show hidden")."""
+    return resolve_scope(
+        db,
+        household_id=ctx.household_id,
+        user_id=ctx.user.id,
+        raw=scope,
+        include_hidden=include_hidden,
+    )
+
+
 def client_ip(request: Request) -> str:
-    """Rate-limit key. Behind nginx this is the proxy's IP, so limits are effectively global."""
+    """Rate-limit key: the client's IP address.
+
+    Behind nginx this comes from X-Forwarded-For. uvicorn only reads that header from proxies
+    listed in FORWARDED_ALLOW_IPS (set in backend/Dockerfile), and nginx overwrites it with the
+    real client address (frontend/nginx.conf.template), so clients can't pick their own key.
+    """
     return request.client.host if request.client else "unknown"

@@ -8,11 +8,11 @@ import { syncApi } from '../../api/sync'
 import { queryKeys } from '../../lib/queryKeys'
 import { useInvalidateFinancialData } from '../accounts/useAccounts'
 
-/** A brand-new connection syncs in the background; poll until its first sync lands. */
+/** Syncs run in the background (first sync, "Sync now"); poll until they finish. */
 const isSyncing = (connections) =>
-  connections?.some((c) => !c.last_synced_at && c.status === 'active') ?? false
+  connections?.some((c) => c.syncing || (!c.last_synced_at && c.status === 'active')) ?? false
 
-/** The household's connections, plus `syncing` while a first sync is in progress. */
+/** The household's connections, plus `syncing` while any sync is in progress. */
 export function useConnections() {
   const queryClient = useQueryClient()
   const invalidate = useInvalidateFinancialData()
@@ -60,15 +60,14 @@ export function useRemoveConnection() {
   })
 }
 
+/**
+ * "Sync now". The server only starts the syncs; refetching connections shows them as `syncing`,
+ * which makes useConnections poll and refresh everything once they finish.
+ */
 export function useSyncNow() {
   const queryClient = useQueryClient()
-  const invalidate = useInvalidateFinancialData()
   return useMutation({
     mutationFn: syncApi.syncNow,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.connections })
-      queryClient.invalidateQueries({ queryKey: queryKeys.syncRuns })
-      invalidate()
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.connections }),
   })
 }

@@ -3,11 +3,11 @@
 Called by frontend/src/api/accounts.js.
 """
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_auth, get_db, require_role
-from app.core.scope import resolve_scope
+from app.api.deps import get_auth, get_db, get_scope_with_hidden, require_role
+from app.core.scope import Scope
 from app.models.enums import Role
 from app.schemas.account import AccountCreate, AccountOut, AccountUpdate
 from app.services import account_service
@@ -18,21 +18,12 @@ router = APIRouter(prefix="/accounts", tags=["accounts"])
 
 @router.get("", response_model=list[AccountOut])
 def list_accounts(
-    scope: str = Query("me", description="me | household | member:<user_id>"),
-    include_hidden: bool = False,
+    scope: Scope = Depends(get_scope_with_hidden),
     ctx: AuthContext = Depends(get_auth),
     db: Session = Depends(get_db),
 ) -> list[AccountOut]:
     """Accounts in the scope. `include_hidden` lets the Accounts page show hidden ones too."""
-    # Resolved here (not via get_scope) because this is the only endpoint with include_hidden.
-    resolved = resolve_scope(
-        db,
-        household_id=ctx.household_id,
-        user_id=ctx.user.id,
-        raw=scope,
-        include_hidden=include_hidden,
-    )
-    return account_service.list_accounts(db, resolved)
+    return account_service.list_accounts(db, ctx, scope)
 
 
 @router.post("", response_model=AccountOut, status_code=status.HTTP_201_CREATED)

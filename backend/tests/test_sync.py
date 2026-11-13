@@ -9,7 +9,7 @@ from app.core import security
 from app.core.clock import to_unix, utcnow
 from app.core.errors import ProviderAuthError
 from app.models import Account, BalanceSnapshot, Connection, SyncRun, Transaction
-from app.models.enums import AccountKind, ConnectionStatus, SyncStatus
+from app.models.enums import AccountKind, ConnectionStatus, SyncStatus, Visibility
 from app.providers.base import Provider
 from app.providers.simplefin.mapper import map_response
 from app.services import sync_service
@@ -61,9 +61,13 @@ def test_first_sync_creates_accounts_and_transactions(db, owner, connection):
     assert accounts["Gold Card"].kind == AccountKind.CREDIT
     assert accounts["Individual"].kind == AccountKind.INVESTMENT  # org is Robinhood
     assert all(a.owner_user_id == owner["user"]["id"] for a in accounts.values())
+    # New accounts start private: whoever connected them decides what the household sees.
+    assert all(a.visibility == Visibility.PRIVATE for a in accounts.values())
     assert db.query(BalanceSnapshot).count() == 3
-    assert connection.label == "American Express, Chase, Robinhood"
+    # The stored label isn't replaced by institution names (they'd reveal private accounts).
+    assert connection.label == "SimpleFIN"
     assert connection.last_synced_at is not None
+    assert connection.sync_lock_until is None  # the claim is released afterwards
 
 
 def test_sync_is_idempotent(db, connection):
@@ -132,10 +136,15 @@ def test_auth_failure_marks_connection(db, connection):
 
 def test_sync_now_respects_cooldown(db, owner, connection, monkeypatch):
     monkeypatch.setattr(sync_service, "get_provider", lambda name: FakeProvider())
-    first = sync_service.sync_household(db, owner["household"]["id"])
-    assert len(first.runs) == 1 and not first.skipped
-    second = sync_service.sync_household(db, owner["household"]["id"])
-    assert not second.runs and "try again" in second.skipped[0].reason
+    first = sync_service.start_household_sync(db, owner["household"]["id"])
+    assert first.started == [connection.id] and not first.skipped
+    # Still claimed (the background sync hasn't run): a second click is told it's running.
+    busy = sync_service.start_household_sync(db, owner["household"]["id"])
+    assert not busy.started and busy.skipped[0].reason == "Already syncing."
+
+    sync_service.run_claimed(db, connection, trigger="manual")
+    second = sync_service.start_household_sync(db, owner["household"]["id"])
+    assert not second.started and "try again" in second.skipped[0].reason
 
 
 def test_scheduler_skips_recent_and_reauth(db, connection, monkeypatch):
@@ -162,10 +171,13 @@ def test_connection_api_and_delete_cascades(client, owner, db, monkeypatch):
     assert connections[0]["account_count"] == 3
     assert db.query(SyncRun).filter_by(trigger="initial").count() == 1
 
-    summary = client.get("/api/v1/summary", params={"scope": "household"}).json()
+    # Synced accounts start private: in my view, not yet in the household's.
+    summary = client.get("/api/v1/summary", params={"scope": "me"}).json()
     assert summary["net_worth_cents"] == 253417 - 81240 + 1543210
+    household = client.get("/api/v1/summary", params={"scope": "household"}).json()
+    assert household["account_count"] == 0
 
-    txns = client.get("/api/v1/transactions", params={"scope": "household"}).json()["items"]
+    txns = client.get("/api/v1/transactions", params={"scope": "me"}).json()["items"]
     assert len(txns) == 4 and all(not t["editable"] for t in txns)
 
     assert client.delete(f"/api/v1/connections/{conn_id}").status_code == 204

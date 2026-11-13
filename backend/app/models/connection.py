@@ -24,6 +24,9 @@ class Connection(IdMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), default=ConnectionStatus.ACTIVE)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime)  # last successful sync
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime)  # drives the cooldown
+    # Set while a sync runs, by an atomic UPDATE (services/sync_service.py), so two processes
+    # (API + worker) can never sync the same connection at once. Expires if a sync dies.
+    sync_lock_until: Mapped[datetime | None] = mapped_column(DateTime)
     last_error: Mapped[str | None] = mapped_column(Text)  # shown in Settings; never secrets
 
     accounts: Mapped[list["Account"]] = relationship(  # noqa: F821

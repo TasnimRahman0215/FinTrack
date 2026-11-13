@@ -22,7 +22,7 @@ export function OwnerBadge({ account, members, meId }) {
 }
 
 /** One group on the Accounts page (e.g. "Credit cards") with its total and account rows. */
-export function AccountGroup({ title, accounts, members, meId, canEdit, onEdit }) {
+export function AccountGroup({ title, accounts, members, meId, onEdit }) {
   const total = accounts.reduce((sum, a) => sum + a.balance_cents, 0)
   return (
     <Card>
@@ -56,7 +56,7 @@ export function AccountGroup({ title, accounts, members, meId, canEdit, onEdit }
               </p>
             </div>
             <Money cents={a.balance_cents} currency={a.currency} className="text-sm font-medium" />
-            {canEdit && (
+            {a.can_edit && (
               <button
                 type="button"
                 onClick={() => onEdit(a)}

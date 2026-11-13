@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
+from app.core.scope import visible_to
 from app.models import Account, Transaction
 from app.models.enums import AccountKind
 
@@ -15,6 +16,15 @@ KIND_ORDER = [k.value for k in AccountKind]
 def get(db: Session, *, household_id: int, account_id: int) -> Account | None:
     return db.scalar(
         select(Account).where(Account.id == account_id, Account.household_id == household_id)
+    )
+
+
+def get_visible(db: Session, *, household_id: int, account_id: int, user_id: int) -> Account | None:
+    """One account, only if `user_id` may see it (core/scope.py rules), in a single query."""
+    return db.scalar(
+        select(Account).where(
+            Account.id == account_id, Account.household_id == household_id, visible_to(user_id)
+        )
     )
 
 

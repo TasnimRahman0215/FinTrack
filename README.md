@@ -34,9 +34,15 @@ docker compose up -d --build
 
 Open <http://localhost:3000>, create your account, then go to **Settings → Add SimpleFIN connection**.
 
+- The backend refuses to start until `SECRET_KEY` is set in `backend/.env`.
 - Data lives in the `fintrack-data` Docker volume (SQLite). Back up `ENCRYPTION_KEY` too: without it,
   saved connections can't be decrypted.
+- Newly synced accounts are private to whoever connected them. Share them from the **Accounts** page.
+- Beyond your own machine, serve FinTrack over HTTPS (e.g. Tailscale) and set `COOKIE_SECURE=true`.
 - Once everyone in your household has signed up, set `ALLOW_SIGNUP=false` in `backend/.env`.
+  Until then, anyone who can reach the server can create an account.
+- To use Postgres in Docker, set `DATABASE_URL` in the `.env` next to `docker-compose.yml`
+  (see `.env.example`); a `DATABASE_URL` in `backend/.env` is ignored there.
 - `SECRET_KEY` and `ENCRYPTION_KEY` are **not** from SimpleFIN. FinTrack generates them (`fintrack gen-keys`).
   The only SimpleFIN value is the **setup token**, and you paste that into the app's UI, not into `.env`.
 - To get a real setup token, open <https://bridge.simplefin.org/simplefin/create>.

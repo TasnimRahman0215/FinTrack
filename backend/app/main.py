@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 
 from app import __version__
 from app.api.v1.router import api_router
-from app.core.config import INSECURE_DEFAULT_SECRET, get_settings
+from app.core.config import INSECURE_DEFAULT_SECRET, check_runtime_settings, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.db.session import get_engine
@@ -30,6 +30,7 @@ CSRF_HEADER = "x-requested-with"
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    check_runtime_settings(settings)
     get_engine()
     if settings.secret_key == INSECURE_DEFAULT_SECRET:
         log.warning(
@@ -55,13 +56,16 @@ def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
 
+    # The interactive docs describe every endpoint; they're handy in development but there's no
+    # reason to publish them from a production server.
+    docs = not settings.is_production
     app = FastAPI(
         title="FinTrack API",
         version=__version__,
         lifespan=lifespan,
-        docs_url="/api/docs",
+        docs_url="/api/docs" if docs else None,
         redoc_url=None,
-        openapi_url="/api/openapi.json",
+        openapi_url="/api/openapi.json" if docs else None,
     )
 
     # CORS is only needed when the frontend is served from another origin; the default

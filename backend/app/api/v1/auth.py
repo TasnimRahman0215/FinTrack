@@ -16,8 +16,12 @@ from app.services.auth_service import AuthContext
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 # Slow down password guessing; limits are per process (see core/rate_limit.py).
+# The tight per-account limit is keyed on (email, IP), so someone who knows your email can only
+# lock *themselves* out, not you. The looser per-email limit still caps guessing that's spread
+# over many IPs.
 _login_per_ip = RateLimiter(max_hits=30, window_seconds=300)
-_login_per_email = RateLimiter(max_hits=10, window_seconds=300)
+_login_per_email_ip = RateLimiter(max_hits=10, window_seconds=300)
+_login_per_email = RateLimiter(max_hits=100, window_seconds=900)
 _signup_per_ip = RateLimiter(max_hits=10, window_seconds=3600)
 
 
@@ -56,8 +60,11 @@ def login(
     data: LoginIn, request: Request, response: Response, db: Session = Depends(get_db)
 ) -> MeOut:
     """Log in with email and password."""
-    _login_per_ip.hit(client_ip(request))
-    _login_per_email.hit(data.email.lower())
+    ip = client_ip(request)
+    email = data.email.lower()
+    _login_per_ip.hit(ip)
+    _login_per_email_ip.hit(f"{email}|{ip}")
+    _login_per_email.hit(email)
     token, ctx = auth_service.login(db, data, user_agent=request.headers.get("user-agent"))
     _set_session_cookie(response, token)
     return auth_service.me(db, ctx)

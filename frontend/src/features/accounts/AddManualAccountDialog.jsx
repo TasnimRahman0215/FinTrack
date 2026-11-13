@@ -20,7 +20,7 @@ export function AddManualAccountDialog({ open, onClose }) {
 }
 
 function AddManualAccountForm({ onDone }) {
-  const { user } = useAuth()
+  const { user, isOwner } = useAuth()
   const create = useCreateAccount()
   const [form, setForm] = useState({
     name: '',
@@ -60,7 +60,7 @@ function AddManualAccountForm({ onDone }) {
         )}
       </Field>
       <KindField value={form.kind} onChange={set('kind')} />
-      <OwnerField value={form.owner} onChange={set('owner')} />
+      <OwnerField value={form.owner} onChange={set('owner')} onlyMe={!isOwner} />
       <VisibilityField value={form.visibility} onChange={set('visibility')} disabled={isJoint(form.owner)} />
       <Field label="Starting balance" hint="Use a minus sign for money owed, e.g. -120.00">
         {(id) => (

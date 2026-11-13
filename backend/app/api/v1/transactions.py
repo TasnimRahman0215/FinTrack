@@ -8,7 +8,7 @@ import datetime as dt
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_scope, require_role
+from app.api.deps import get_auth, get_db, get_scope, require_role
 from app.core.scope import Scope
 from app.models.enums import Role
 from app.repositories.transaction_repo import TransactionFilters
@@ -29,11 +29,14 @@ def list_transactions(
     q: str | None = Query(None, max_length=200, description="Search description/payee/notes"),
     cursor: str | None = None,
     limit: int = Query(50, ge=1, le=200),
+    ctx: AuthContext = Depends(get_auth),
     db: Session = Depends(get_db),
 ) -> Page[TransactionOut]:
     """Newest first. Pass `next_cursor` from one page as `cursor` to get the next."""
     filters = TransactionFilters(account_id=account_id, start=start, end=end, q=q or None)
-    return transaction_service.list_transactions(db, scope, filters, cursor=cursor, limit=limit)
+    return transaction_service.list_transactions(
+        db, ctx, scope, filters, cursor=cursor, limit=limit
+    )
 
 
 @router.post("", response_model=TransactionOut, status_code=status.HTTP_201_CREATED)

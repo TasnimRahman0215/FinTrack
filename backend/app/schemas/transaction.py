@@ -5,7 +5,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field, StringConstraints
 
-from app.schemas.common import ORMModel
+from app.schemas.common import Cents, ORMModel
 
 Text255 = Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]
 
@@ -23,13 +23,13 @@ class TransactionOut(ORMModel):
     memo: str | None
     notes: str | None
     pending: bool
-    editable: bool  # manual transactions can be edited/deleted
+    editable: bool  # a manual transaction in an account the signed-in user may edit
 
 
 class TransactionCreate(BaseModel):
     account_id: int
     date: dt.date
-    amount_cents: Annotated[int, Field(description="Negative = money out, positive = money in")]
+    amount_cents: Annotated[Cents, Field(description="Negative = money out, positive = money in")]
     description: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
     ]
@@ -42,7 +42,7 @@ class TransactionUpdate(BaseModel):
 
     account_id: int | None = None
     date: dt.date | None = None
-    amount_cents: int | None = None
+    amount_cents: Cents | None = None
     description: (
         Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
         | None

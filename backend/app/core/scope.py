@@ -6,8 +6,10 @@ Every data endpoint takes `?scope=` and receives the allowed account IDs from he
 - `member:<id>`     that member's *shared* accounts + joint accounts
 - `household`       every member's shared accounts + joint accounts
 
-Joint accounts (owner_user_id IS NULL) are always shared. Private accounts are only ever
-visible to their owner, through `me`.
+A joint account has no owner (owner_user_id IS NULL) *and* is shared; the services keep joint
+accounts shared. An account with no owner that is still marked private (its owner's user row was
+deleted) is visible to nobody: it must never turn into a joint account by accident. Private
+accounts are only ever visible to their owner, through `me`.
 
 Used by app/api/deps.py (`get_scope`) for list endpoints, and by services through
 `visible_account_ids` before reading or editing a single account or transaction.
@@ -51,7 +53,7 @@ def parse_scope(raw: str) -> tuple[str, int | None]:
 
 
 def _joint() -> ColumnElement[bool]:
-    return Account.owner_user_id.is_(None)
+    return and_(Account.owner_user_id.is_(None), Account.visibility == Visibility.SHARED)
 
 
 def _shared() -> ColumnElement[bool]:
@@ -89,10 +91,15 @@ def resolve_scope(
     return Scope(kind=kind, member_user_id=member_id, account_ids=ids)
 
 
+def visible_to(user_id: int) -> ColumnElement[bool]:
+    """SQL condition: accounts this user may see in some scope (own, shared or joint).
+
+    Combine it with a household filter. Used for single-account lookups and connection details.
+    """
+    return or_(Account.owner_user_id == user_id, _shared())
+
+
 def visible_account_ids(db: Session, *, household_id: int, user_id: int) -> set[int]:
     """Every account this user may see in any scope (including hidden ones)."""
-    stmt = select(Account.id).where(
-        Account.household_id == household_id,
-        or_(Account.owner_user_id == user_id, _joint(), _shared()),
-    )
+    stmt = select(Account.id).where(Account.household_id == household_id, visible_to(user_id))
     return set(db.scalars(stmt).all())

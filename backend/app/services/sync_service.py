@@ -1,15 +1,19 @@
 """Sync orchestration: provider fetch -> upsert accounts/transactions -> balance snapshots ->
 post-sync pipeline -> sync_runs record. Provider-agnostic: works with any `Provider`.
 
-Called from three places: api/v1/connections.py (first sync after connecting), api/v1/sync.py
-("Sync now") and jobs/sync_job.py (scheduled). See docs/architecture.md#sync for the overview.
+Called from four places: api/v1/connections.py (first sync after connecting), api/v1/sync.py
+("Sync now"), jobs/sync_job.py (scheduled) and the `fintrack sync` CLI. See
+docs/architecture.md#sync for the overview.
+
+Concurrency: a connection is claimed with one atomic UPDATE on `connections.sync_lock_until`
+(`try_claim`), so the API, the optional worker and the CLI never sync the same connection at once,
+even in different processes. The same UPDATE enforces the minimum gap between syncs.
 """
 
 import logging
-import threading
-from collections import defaultdict
 from datetime import datetime, timedelta
 
+from sqlalchemy import or_, update
 from sqlalchemy.orm import Session
 
 from app.core import security
@@ -17,19 +21,19 @@ from app.core.clock import utcnow
 from app.core.config import get_settings
 from app.core.errors import AppError, ProviderAuthError
 from app.models import Account, Connection, SyncRun, Transaction
-from app.models.enums import ConnectionStatus, Source, SyncStatus, Visibility
+from app.models.enums import ConnectionStatus, SyncStatus, Visibility
 from app.pipeline.registry import run_pipeline
 from app.providers.base import FetchResult, Provider, ProviderAccount, ProviderTransaction
 from app.providers.registry import get_provider
 from app.repositories import account_repo, balance_repo, connection_repo, transaction_repo
-from app.schemas.sync import SyncResultOut, SyncRunOut, SyncSkipped
+from app.schemas.sync import SyncSkipped, SyncStartOut
 from app.services.account_service import guess_kind
 
 log = logging.getLogger(__name__)
 
-# One sync per connection at a time (scheduler thread vs. "Sync now" button).
-_locks: dict[int, threading.Lock] = defaultdict(threading.Lock)
-_locks_guard = threading.Lock()
+# A claim expires after this long, so a sync whose process died doesn't block the connection
+# forever. Far longer than any real sync (a few HTTP calls with 60 s timeouts).
+LOCK_TTL = timedelta(minutes=30)
 
 # Provider fields refreshed on every sync. User fields (notes, ...) are never touched.
 _TXN_PROVIDER_FIELDS = (
@@ -44,9 +48,36 @@ _TXN_PROVIDER_FIELDS = (
 )
 
 
-def _lock_for(connection_id: int) -> threading.Lock:
-    with _locks_guard:
-        return _locks[connection_id]
+def try_claim(db: Session, connection: Connection, *, min_gap: timedelta | None = None) -> bool:
+    """Atomically mark `connection` as syncing. False if it's already syncing (in any process)
+    or, with `min_gap`, if the last attempt was less than `min_gap` ago.
+
+    On success the cooldown clock (`last_attempt_at`) starts now and `connection` is refreshed.
+    """
+    now = utcnow()
+    conditions = [
+        Connection.id == connection.id,
+        or_(Connection.sync_lock_until.is_(None), Connection.sync_lock_until < now),
+    ]
+    if min_gap is not None:
+        conditions.append(
+            or_(Connection.last_attempt_at.is_(None), Connection.last_attempt_at <= now - min_gap)
+        )
+    result = db.execute(
+        update(Connection)
+        .where(*conditions)
+        .values(sync_lock_until=now + LOCK_TTL, last_attempt_at=now)
+        .execution_options(synchronize_session=False)
+    )
+    db.commit()
+    if result.rowcount != 1:
+        return False
+    db.refresh(connection)
+    return True
+
+
+def is_syncing(connection: Connection) -> bool:
+    return connection.sync_lock_until is not None and connection.sync_lock_until > utcnow()
 
 
 def sync_connection(
@@ -55,15 +86,24 @@ def sync_connection(
     *,
     trigger: str = "manual",
     provider: Provider | None = None,
+    min_gap: timedelta | None = None,
 ) -> SyncRun | None:
-    """Sync one connection. Returns None if another sync of it is already running."""
-    lock = _lock_for(connection.id)
-    if not lock.acquire(blocking=False):
+    """Claim and sync one connection. None if it's already syncing (or synced within min_gap)."""
+    if not try_claim(db, connection, min_gap=min_gap):
         return None
+    return run_claimed(db, connection, trigger=trigger, provider=provider)
+
+
+def run_claimed(
+    db: Session, connection: Connection, *, trigger: str, provider: Provider | None = None
+) -> SyncRun:
+    """Sync a connection already claimed with `try_claim`, then release the claim."""
     try:
         return _sync_locked(db, connection, trigger, provider or get_provider(connection.provider))
     finally:
-        lock.release()
+        db.rollback()  # drop anything a failure left half-done before releasing
+        connection.sync_lock_until = None
+        db.commit()
 
 
 def _sync_locked(db: Session, connection: Connection, trigger: str, provider: Provider) -> SyncRun:
@@ -77,10 +117,9 @@ def _sync_locked(db: Session, connection: Connection, trigger: str, provider: Pr
         else earliest
     )
 
-    # Record the attempt up front so the run shows as "running" and the cooldown starts now.
+    # Record the run up front so it shows as "running" (try_claim already started the cooldown).
     run = SyncRun(connection_id=connection.id, trigger=trigger, errors=[])
     db.add(run)
-    connection.last_attempt_at = now
     db.commit()
 
     try:
@@ -156,7 +195,7 @@ def _apply(
         for p_txn in p_account.transactions:
             txn = found.get(p_txn.provider_txn_id)
             if txn is None:
-                txn = _new_transaction(account.id, p_txn)
+                txn = _new_transaction(account.id, connection.provider, p_txn)
                 db.add(txn)
                 new_txns.append(txn)
                 found[p_txn.provider_txn_id] = txn
@@ -173,27 +212,28 @@ def _apply(
 
     db.flush()
     run.txns_new = len(new_txns)
-    # Label the connection by its institutions, e.g. "Chase, Robinhood".
-    if result.accounts:
-        orgs = sorted({a.org_name for a in result.accounts if a.org_name})
-        if orgs:
-            connection.label = ", ".join(orgs)[:200]
+    # The connection's label isn't overwritten with institution names: that would reveal members'
+    # private accounts. connection_service builds a per-viewer label instead.
     return [t.id for t in new_txns]
 
 
 def _create_account(db: Session, connection: Connection, p: ProviderAccount) -> Account:
-    """First time we see an account: guess its kind and give it to whoever connected it."""
+    """First time we see an account: guess its kind and give it to whoever connected it.
+
+    New accounts start PRIVATE: the person who connected them decides what the household sees,
+    instead of everything being visible until they notice and hide it.
+    """
     return account_repo.add(
         db,
         Account(
             household_id=connection.household_id,
-            source=Source.SIMPLEFIN if connection.provider == "simplefin" else connection.provider,
+            source=connection.provider,  # the provider name is also its Source value
             connection_id=connection.id,
             provider_account_id=p.provider_account_id,
             name=p.name,
             kind=guess_kind(p.name, p.org_name, p.balance_cents),
             owner_user_id=connection.added_by_user_id,  # whoever connected it; editable later
-            visibility=Visibility.SHARED,
+            visibility=Visibility.PRIVATE,
         ),
     )
 
@@ -208,10 +248,10 @@ def _update_account(account: Account, p: ProviderAccount) -> None:
     account.balance_as_of = p.balance_as_of or utcnow()
 
 
-def _new_transaction(account_id: int, p: ProviderTransaction) -> Transaction:
+def _new_transaction(account_id: int, source: str, p: ProviderTransaction) -> Transaction:
     return Transaction(
         account_id=account_id,
-        source=Source.SIMPLEFIN,
+        source=source,
         provider_txn_id=p.provider_txn_id,
         date=p.date,
         posted_at=p.posted_at,
@@ -252,42 +292,36 @@ def _fail(
     return run
 
 
-def sync_household(db: Session, household_id: int) -> SyncResultOut:
-    """'Sync now' for every connection in a household, respecting a short cooldown so we stay
-    under SimpleFIN's ~24 requests/day/connection limit."""
+def start_household_sync(db: Session, household_id: int) -> SyncStartOut:
+    """'Sync now': claim every connection in a household that isn't syncing or in its cooldown
+    (which keeps us under SimpleFIN's ~24 requests/day/connection). The caller runs the claimed
+    ones with `run_claimed` in the background, so the request returns at once."""
     cooldown = timedelta(minutes=get_settings().sync_cooldown_minutes)
-    now = utcnow()
-    runs: list[SyncRunOut] = []
+    started: list[int] = []
     skipped: list[SyncSkipped] = []
     for connection, _ in connection_repo.list_for_household(db, household_id):
-        if connection.last_attempt_at and now - connection.last_attempt_at < cooldown:
-            wait = int((cooldown - (now - connection.last_attempt_at)).total_seconds() // 60) + 1
-            skipped.append(
-                SyncSkipped(
-                    connection_id=connection.id, reason=f"Synced recently; try again in {wait} min."
-                )
-            )
+        if try_claim(db, connection, min_gap=cooldown):
+            started.append(connection.id)
             continue
-        run = sync_connection(db, connection, trigger="manual")
-        if run is None:
-            skipped.append(SyncSkipped(connection_id=connection.id, reason="Already syncing."))
+        db.refresh(connection)
+        if is_syncing(connection):
+            reason = "Already syncing."
         else:
-            runs.append(SyncRunOut.model_validate(run))
-    return SyncResultOut(runs=runs, skipped=skipped)
+            since = utcnow() - (connection.last_attempt_at or utcnow())
+            wait = max(int((cooldown - since).total_seconds() // 60) + 1, 1)
+            reason = f"Synced recently; try again in {wait} min."
+        skipped.append(SyncSkipped(connection_id=connection.id, reason=reason))
+    return SyncStartOut(started=started, skipped=skipped)
 
 
 def sync_due(db: Session) -> int:
-    """Scheduler entry point: sync every connection whose last sync is older than the interval."""
-    interval = timedelta(hours=get_settings().sync_interval_hours)
-    now = utcnow()
+    """Scheduler entry point: sync every connection last attempted longer ago than the interval."""
+    # 5-minute slack so a connection isn't skipped just because the check ran slightly early.
+    due_after = timedelta(hours=get_settings().sync_interval_hours) - timedelta(minutes=5)
     count = 0
     for connection in connection_repo.list_all(db):
         if connection.status == ConnectionStatus.REAUTH_REQUIRED:
             continue
-        last = connection.last_attempt_at or connection.last_synced_at
-        # 5-minute slack so a connection isn't skipped just because the check ran slightly early.
-        if last and now - last < interval - timedelta(minutes=5):
-            continue
-        if sync_connection(db, connection, trigger="scheduled"):
+        if sync_connection(db, connection, trigger="scheduled", min_gap=due_after):
             count += 1
     return count

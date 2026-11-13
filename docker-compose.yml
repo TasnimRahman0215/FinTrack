@@ -1,6 +1,10 @@
 # FinTrack: `docker compose up -d`, then open http://localhost:3000
 # First time: cp backend/.env.example backend/.env and fill SECRET_KEY / ENCRYPTION_KEY
 #   (generate them with: docker compose run --rm backend fintrack gen-keys)
+#
+# Where settings go: app settings live in backend/.env. DATABASE_URL, FRONTEND_PORT,
+# BACKEND_PORT and POSTGRES_PASSWORD are read by this file, so they go in the .env next to it
+# (see .env.example). A DATABASE_URL in backend/.env is ignored in Docker: the line below wins.
 
 services:
   backend:
@@ -8,6 +12,7 @@ services:
     image: fintrack-backend:local
     env_file: backend/.env
     environment:
+      # Set DATABASE_URL in ./.env (not backend/.env) to use Postgres.
       DATABASE_URL: ${DATABASE_URL:-sqlite:////data/fintrack.db}
     volumes:
       - fintrack-data:/data
@@ -22,7 +27,7 @@ services:
     environment:
       BACKEND_URL: http://backend:8000
     ports:
-      - "${FRONTEND_PORT:-3000}:80"
+      - "${FRONTEND_PORT:-3000}:8080"
     depends_on:
       backend:
         condition: service_healthy
@@ -30,7 +35,8 @@ services:
 
   # Optional Postgres instead of SQLite:
   #   docker compose --profile postgres up -d
-  #   and set DATABASE_URL=postgresql+psycopg://fintrack:fintrack@postgres:5432/fintrack in .env
+  #   and set DATABASE_URL=postgresql+psycopg://fintrack:fintrack@postgres:5432/fintrack in ./.env
+  #   (the .env next to this file, not backend/.env)
   postgres:
     image: postgres:16-alpine
     profiles: ["postgres"]
@@ -43,7 +49,8 @@ services:
     restart: unless-stopped
 
   # Optional separate scheduler. If you use it, set RUN_SCHEDULER=false in backend/.env
-  # (the worker sets it to true for itself). Run only one scheduler per database.
+  # (the worker sets it to true for itself). Syncs are locked in the database, so a second
+  # scheduler can't double-sync a connection, but one per database is all you need.
   worker:
     image: fintrack-backend:local
     profiles: ["worker"]

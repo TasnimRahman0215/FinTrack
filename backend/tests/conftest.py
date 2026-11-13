@@ -21,6 +21,8 @@ os.environ.update(
         "ENCRYPTION_KEY": Fernet.generate_key().decode(),
         "ALLOW_SIGNUP": "true",
         "DATABASE_URL": "sqlite:///:memory:",  # replaced per test by the `engine` fixture
+        # The tests' mock SimpleFIN servers live on example.com.
+        "SIMPLEFIN_ALLOWED_HOSTS": "simplefin.org,example.com",
     }
 )
 

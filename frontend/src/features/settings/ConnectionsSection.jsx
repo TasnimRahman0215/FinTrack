@@ -61,14 +61,15 @@ export function ConnectionsSection() {
               const status = CONNECTION_STATUS[c.status] ?? { label: c.status, tone: 'slate' }
               // Never synced and no error yet: the first sync is still running in the background.
               const firstSync = !c.last_synced_at && c.status === 'active'
+              const running = firstSync || c.syncing
               return (
                 <li key={c.id} className="flex items-start gap-3 p-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-medium">{c.label}</span>
-                      {firstSync ? (
+                      {running ? (
                         <Badge tone="blue">
-                          <Spinner className="h-3 w-3" /> First sync…
+                          <Spinner className="h-3 w-3" /> {firstSync ? 'First sync…' : 'Syncing…'}
                         </Badge>
                       ) : (
                         <Badge tone={status.tone}>{status.label}</Badge>
@@ -82,7 +83,7 @@ export function ConnectionsSection() {
                       <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{c.last_error}</p>
                     )}
                   </div>
-                  {canEdit && (
+                  {c.can_manage && (
                     <Button
                       variant="ghost"
                       size="icon"
@@ -100,7 +101,14 @@ export function ConnectionsSection() {
         )}
         {syncing && (
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            The first sync pulls up to 90 days of history and can take a minute.
+            Syncing in the background. A first sync pulls up to 90 days of history and can take a
+            minute.
+          </p>
+        )}
+        {connections?.length > 0 && (
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Newly synced accounts start as private to whoever connected them. Open Accounts to share
+            them with the household.
           </p>
         )}
 

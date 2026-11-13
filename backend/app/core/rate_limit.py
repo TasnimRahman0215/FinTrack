@@ -22,18 +22,34 @@ class RateLimiter:
         self.window = window_seconds
         self._hits: dict[str, deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
+        self._last_sweep = time.monotonic()
         _registry.append(self)
 
     def hit(self, key: str) -> None:
         """Record one attempt for `key`, or raise TooManyRequests if the limit is reached."""
         now = time.monotonic()
         with self._lock:
+            self._sweep(now)
             hits = self._hits[key]
             while hits and now - hits[0] > self.window:
                 hits.popleft()
             if len(hits) >= self.max_hits:
                 raise TooManyRequests("Too many attempts. Please wait a few minutes and try again.")
             hits.append(now)
+
+    def _sweep(self, now: float) -> None:
+        """Forget keys with no hits inside the window, so the dict can't grow without bound
+        (every new IP or email would otherwise stay in memory until a restart)."""
+        if now - self._last_sweep < self.window:
+            return
+        self._last_sweep = now
+        for key in [
+            k for k, hits in self._hits.items() if not hits or now - hits[-1] > self.window
+        ]:
+            del self._hits[key]
+
+    def __len__(self) -> int:
+        return len(self._hits)
 
     def reset(self) -> None:
         with self._lock:

@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     initial_sync_days: int = 90  # history requested on the first sync
     sync_overlap_days: int = 14  # re-fetch this far back each sync to catch late-posting items
 
+    # The only hosts FinTrack will contact for SimpleFIN (a domain also allows its subdomains).
+    # Stops a pasted setup token or access URL from making the server call arbitrary addresses.
+    simplefin_allowed_hosts: str = "simplefin.org"
+
     @field_validator("secret_key")
     @classmethod
     def _blank_secret_uses_default(cls, value: str) -> str:
@@ -56,6 +60,32 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def simplefin_host_list(self) -> list[str]:
+        return [
+            h.strip().lower().rstrip(".")
+            for h in self.simplefin_allowed_hosts.split(",")
+            if h.strip()
+        ]
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment == "production"
+
+
+def check_runtime_settings(settings: Settings) -> None:
+    """Refuse to run in production with the published default SECRET_KEY.
+
+    Called at startup by app/main.py and app/worker.py. Development and tests only get a warning
+    (logged by main.py), so a fresh checkout still starts.
+    """
+    if settings.is_production and settings.secret_key == INSECURE_DEFAULT_SECRET:
+        raise RuntimeError(
+            "SECRET_KEY is not set. Run `fintrack gen-keys` (Docker: "
+            "`docker compose run --rm backend fintrack gen-keys`) and paste the values into "
+            "backend/.env."
+        )
 
 
 @lru_cache

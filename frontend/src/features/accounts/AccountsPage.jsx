@@ -88,7 +88,6 @@ export function AccountsPage() {
               accounts={list}
               members={members}
               meId={user.id}
-              canEdit={canEdit}
               onEdit={setEditing}
             />
           ))}

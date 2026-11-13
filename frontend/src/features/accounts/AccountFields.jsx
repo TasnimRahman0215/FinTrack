@@ -22,11 +22,14 @@ export function KindField({ value, onChange }) {
   )
 }
 
-/** Household members plus "Joint". Values are strings; see owner.js for the conversion. */
-export function OwnerField({ value, onChange, disabled }) {
+/**
+ * Household members plus "Joint". Values are strings; see owner.js for the conversion.
+ * `onlyMe`: offer just "me" and "Joint" (contributors can't create accounts for other people).
+ */
+export function OwnerField({ value, onChange, disabled, onlyMe = false }) {
   const { user } = useAuth()
   const { data: household } = useHousehold()
-  const members = household?.members ?? []
+  const members = (household?.members ?? []).filter((m) => !onlyMe || m.user_id === user?.id)
   return (
     <Field label="Owner" hint="Joint accounts appear in everyone's view.">
       {(id) => (

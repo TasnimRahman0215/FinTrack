@@ -43,7 +43,7 @@ def create_connection(
     """Claim a SimpleFIN setup token, save the connection, and start the first sync."""
     connection = connection_service.create(db, ctx, data.setup_token)
     background.add_task(_initial_sync, connection.id)  # runs after the response is sent
-    return connection_service.to_out(connection)
+    return connection_service.to_out(db, ctx, connection, total_accounts=0, visible=[])
 
 
 @router.delete("/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)

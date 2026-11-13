@@ -1,6 +1,13 @@
 """Shared schema building blocks."""
 
-from pydantic import BaseModel, ConfigDict
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field
+
+# Largest amount accepted from clients: $100 billion. Keeps sums far from 64-bit overflow
+# and well inside the range JavaScript numbers represent exactly.
+MAX_CENTS = 10**13
+Cents = Annotated[int, Field(ge=-MAX_CENTS, le=MAX_CENTS)]
 
 
 class ORMModel(BaseModel):

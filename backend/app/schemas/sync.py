@@ -22,12 +22,15 @@ class SyncRunOut(ORMModel):
 
 
 class SyncSkipped(BaseModel):
-    """A connection "Sync now" didn't run, and why (cooldown or already syncing)."""
+    """A connection "Sync now" didn't start, and why (cooldown or already syncing)."""
 
     connection_id: int
     reason: str
 
 
-class SyncResultOut(BaseModel):
-    runs: list[SyncRunOut]
+class SyncStartOut(BaseModel):
+    """ "Sync now" result. Syncs run in the background; poll /connections (`syncing`) to see
+    when they finish."""
+
+    started: list[int]
     skipped: list[SyncSkipped]
