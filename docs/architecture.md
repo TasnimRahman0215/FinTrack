@@ -69,15 +69,20 @@ Private accounts appear only in their owner's `me` view. This rule lives only in
 | Action | owner | contributor | reader |
 |---|:-:|:-:|:-:|
 | See shared data and your own | ✓ | ✓ | ✓ |
-| Edit your own and joint accounts, add manual accounts and transactions to them | ✓ | ✓ | |
-| Edit other members' (shared) accounts and their manual transactions | ✓ | | |
+| Everything on your own accounts | ✓ | ✓ | |
+| Everyday edits on joint accounts (name, type, manual transactions) | ✓ | ✓ | |
+| Give a joint account an owner, make it private, hide it, delete it | ✓ | | |
+| Look after a former member's accounts (edit, reassign, delete) | ✓ | | |
+| Change another current member's account in any way | | | |
 | Connect SimpleFIN, "Sync now" | ✓ | ✓ | |
-| Remove a connection you added (the household owner also: one whose adder has left) | ✓ | ✓ | |
+| Remove a connection you added (the household owner: one whose adder left or is now a reader) | ✓ | ✓ | |
 | Rename household (later: invite and remove members) | ✓ | | |
 
-Only an account's owner (or the household owner) can change its owner or visibility; for a joint
-account that means only the household owner. These rules live in `account_service.permissions`,
-and every account in the API carries `can_edit` / `can_reassign` so the UI never re-derives them.
+An account belongs to its owner: not even the household owner can edit, reassign, hide or delete
+another current member's account. Joint accounts belong to everyone, so contributors make everyday
+edits, but only the household owner can take one away from the household (owner, visibility,
+hidden, delete). These rules live in `account_service.permissions`, and every account in the API
+carries `can_edit` / `can_manage` so the UI never re-derives them.
 
 ## Sync
 
@@ -95,7 +100,8 @@ scheduler (every 30 min: syncs connections not synced in SYNC_INTERVAL_HOURS)  o
       → sync_runs row, then release the claim
 ```
 
-- "Sync now" has a 15-minute cooldown per connection, to stay under SimpleFIN's ~24 requests/day.
+- "Sync now" has a 15-minute cooldown and a daily cap (`SYNC_MANUAL_DAILY_LIMIT`, default 12) per
+  connection. With the 4 scheduled syncs a day that stays under SimpleFIN's ~24 requests/day.
   It only claims the connections and returns `202`; the syncs run in the background and
   `GET /connections` reports `syncing` until they finish.
 - The claim lives in the database, so the API, the optional worker and the CLI never sync the same
@@ -107,22 +113,39 @@ scheduler (every 30 min: syncs connections not synced in SYNC_INTERVAL_HOURS)  o
 
 ## Security
 
-- Passwords: argon2. Unknown emails take the same time as wrong passwords.
+- Passwords: argon2. Unknown emails take the same time as wrong passwords. Each hash needs ~64 MiB,
+  so at most `PASSWORD_HASH_CONCURRENCY` (default 2) run at once; others wait (a 503 after 10 s).
+  Without the cap, 30 parallel logins took the API from 80 MiB to ~1 GB; with it, ~220 MiB.
+- Accounts: users change their password in Settings (other sessions are signed out) and can sign out
+  everywhere. An admin can reset a forgotten password with `fintrack reset-password <email>`.
 - Login rate limits: 30 attempts per IP and 10 per (email, IP) every 5 minutes, plus 100 per email
   every 15 minutes. Keying the tight limit on (email, IP) means a stranger who knows your email can
   only lock themselves out. The client IP comes from `X-Forwarded-For`, which nginx overwrites with
   the real address and uvicorn only trusts from `FORWARDED_ALLOW_IPS` (private Docker ranges by
-  default). Behind another proxy (Caddy, Tailscale serve...), every request looks like it comes from
-  that proxy, so the per-IP limit becomes shared.
-- Sessions: HttpOnly cookie, `SameSite=Lax`, and `Secure` when `COOKIE_SECURE=true`. Revocable server-side.
-  Use HTTPS beyond localhost: over plain HTTP, passwords and cookies cross the network unencrypted.
+  default). Behind another reverse proxy (Caddy, Tailscale serve, a load balancer), set
+  `TRUSTED_PROXIES` on the frontend container to that proxy's address: nginx then takes the real
+  client IP from the proxy's `X-Forwarded-For`, and ignores the header from anyone else. Without
+  it, every user behind the proxy shares one IP and one limit.
+- Sessions: HttpOnly cookie, `SameSite=Lax`, revocable server-side. Idle sessions end after
+  `SESSION_DAYS` (30) and every session after `SESSION_MAX_DAYS` (90), however active.
+  Use HTTPS beyond localhost (`COOKIE_SECURE=true`): over plain HTTP, passwords and cookies cross the
+  network unencrypted. Over HTTPS the cookie is named `__Host-fintrack_session`, which binds it to
+  exactly this host.
+- **Give FinTrack its own hostname** (e.g. `fintrack.home.lan` or its own Tailscale machine name).
+  Browsers send cookies to every port of a host, so another app at `myserver:8080` would receive
+  FinTrack's session cookie if FinTrack runs at `myserver:3000`.
+- API responses carry `Cache-Control: no-store`, so financial data isn't kept in browser caches.
 - CSRF: every write request must send `X-Requested-With` (browsers can't add it cross-site without CORS approval).
+  `CORS_ORIGINS` must list exact origins; `*` is refused at startup, because with credentials
+  allowed it would let any website use a signed-in user's session.
 - SimpleFIN credentials are encrypted at rest with `ENCRYPTION_KEY`. FinTrack only contacts hosts in
   `SIMPLEFIN_ALLOWED_HOSTS` (default `simplefin.org` and its subdomains, HTTPS on port 443), so a
   pasted token or access URL can't make the server call other addresses. Network error details go to
   the server log, not to users.
-- The Docker image runs with `ENVIRONMENT=production`: it refuses to start without a real
-  `SECRET_KEY` and doesn't serve `/api/docs`.
+- The Docker image runs with `ENVIRONMENT=production`: it refuses to start unless `SECRET_KEY` is set
+  and at least 32 characters, and it doesn't serve `/api/docs`.
+- SimpleFIN URLs are parsed with the same library (httpx) that sends the request, so the host that
+  is checked is the host that is contacted; anything it can't parse is a 400, not a crash.
 - nginx (unprivileged) sends a strict Content-Security-Policy, `X-Frame-Options: DENY`,
   `X-Content-Type-Options`, `Referrer-Policy` and `Permissions-Policy`. If the API is on another
   origin, add it to `CSP_CONNECT_SRC`.

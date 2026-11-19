@@ -1,7 +1,6 @@
 """SimpleFIN implementation of the Provider interface, registered in providers/registry.py."""
 
 import datetime as dt
-from urllib.parse import urlsplit
 
 import httpx
 
@@ -62,7 +61,7 @@ class SimpleFINProvider(Provider):
 
     def connect(self, setup_payload: str) -> tuple[str, str]:
         access_url = client.claim_access_url(setup_payload, client=self._http)
-        host = urlsplit(access_url).hostname or "SimpleFIN"
+        host = httpx.URL(access_url).host or "SimpleFIN"  # already validated by the client
         return access_url, f"SimpleFIN ({host})"
 
     def fetch(

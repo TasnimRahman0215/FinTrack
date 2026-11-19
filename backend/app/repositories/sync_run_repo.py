@@ -1,11 +1,26 @@
 """Sync history reads, for GET /api/v1/sync/runs. Runs are written by services/sync_service.py."""
 
 from collections.abc import Collection
+from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Connection, SyncRun
+
+
+def count_since(db: Session, connection_id: int, *, trigger: str, since: datetime) -> int:
+    """How many runs of this kind a connection started since `since` (daily "Sync now" cap)."""
+    return (
+        db.scalar(
+            select(func.count(SyncRun.id)).where(
+                SyncRun.connection_id == connection_id,
+                SyncRun.trigger == trigger,
+                SyncRun.started_at >= since,
+            )
+        )
+        or 0
+    )
 
 
 def recent_for_household(

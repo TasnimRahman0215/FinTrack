@@ -26,9 +26,9 @@ function AccountEditForm({ account, onDone }) {
   const update = useUpdateAccount()
   const remove = useDeleteAccount()
   const isManual = account.source === 'manual'
-  // The API says what this user may do (only the account's owner or the household owner can
-  // change who owns it or who can see it).
-  const canReassign = account.can_reassign
+  // The API says what this user may do: can_manage covers owner, visibility, hiding and
+  // deleting (the account's owner; for a joint account, the household owner).
+  const canManage = account.can_manage
 
   const [form, setForm] = useState({
     name: account.name,
@@ -44,9 +44,10 @@ function AccountEditForm({ account, onDone }) {
 
   const onSubmit = (e) => {
     e.preventDefault()
-    const body = { id: account.id, display_name: form.display_name, kind: form.kind, is_hidden: form.is_hidden }
+    const body = { id: account.id, display_name: form.display_name, kind: form.kind }
     // Only send owner/visibility when allowed, so the API doesn't reject the whole update.
-    if (canReassign) {
+    if (canManage) {
+      body.is_hidden = form.is_hidden
       body.owner_user_id = valueToOwner(form.owner)
       body.visibility = form.visibility
     }
@@ -80,11 +81,11 @@ function AccountEditForm({ account, onDone }) {
         </Field>
       )}
       <KindField value={form.kind} onChange={set('kind')} />
-      <OwnerField value={form.owner} onChange={set('owner')} disabled={!canReassign} />
+      <OwnerField value={form.owner} onChange={set('owner')} disabled={!canManage} />
       <VisibilityField
         value={form.visibility}
         onChange={set('visibility')}
-        disabled={!canReassign || isJoint(form.owner)}
+        disabled={!canManage || isJoint(form.owner)}
       />
       {isManual && (
         <Field label="Starting balance">
@@ -95,6 +96,7 @@ function AccountEditForm({ account, onDone }) {
         <input
           type="checkbox"
           checked={form.is_hidden}
+          disabled={!canManage}
           onChange={(e) => set('is_hidden')(e.target.checked)}
           className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600"
         />
@@ -102,7 +104,7 @@ function AccountEditForm({ account, onDone }) {
       </label>
       <ErrorMessage error={error || update.error || remove.error} />
       <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-        {isManual ? (
+        {isManual && canManage ? (
           <Button variant="ghost" className="text-red-600 dark:text-red-400" onClick={onDelete} loading={remove.isPending}>
             Delete account
           </Button>

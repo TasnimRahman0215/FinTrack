@@ -43,6 +43,7 @@ export function AuthProvider({ children }) {
   const login = useMutation({ mutationFn: authApi.login, onSuccess: onSignedIn })
   const signup = useMutation({ mutationFn: authApi.signup, onSuccess: onSignedIn })
   const logout = useMutation({ mutationFn: authApi.logout, onSettled: signedOut })
+  const logoutAll = useMutation({ mutationFn: authApi.logoutAll, onSuccess: signedOut })
 
   const me = meQuery.data
   const value = useMemo(
@@ -58,8 +59,9 @@ export function AuthProvider({ children }) {
       login,
       signup,
       logout,
+      logoutAll,
     }),
-    [me, meQuery.isLoading, meQuery.error, login, signup, logout],
+    [me, meQuery.isLoading, meQuery.error, login, signup, logout, logoutAll],
   )
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

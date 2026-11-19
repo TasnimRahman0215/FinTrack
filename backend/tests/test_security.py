@@ -214,13 +214,13 @@ def test_contributor_cannot_create_an_account_for_someone_else(client, owner, pa
 def test_permission_flags_match_the_rules(engine, client, owner, partner, db, household_accounts):
     partner_client, _ = partner
     flags = {
-        a["name"]: (a["can_edit"], a["can_reassign"])
+        a["name"]: (a["can_edit"], a["can_manage"])
         for a in partner_client.get("/api/v1/accounts", params={"scope": "household"}).json()
     }
     assert flags == {"Owner cash": (False, False), "Joint savings": (True, False)}
 
     owner_flags = {
-        a["name"]: (a["can_edit"], a["can_reassign"])
+        a["name"]: (a["can_edit"], a["can_manage"])
         for a in client.get("/api/v1/accounts", params={"scope": "household"}).json()
     }
     assert owner_flags == {"Owner cash": (True, True), "Joint savings": (True, True)}
@@ -234,7 +234,7 @@ def test_permission_flags_match_the_rules(engine, client, owner, partner, db, ho
             role=Role.READER,
         )
         accounts = reader_client.get("/api/v1/accounts", params={"scope": "household"}).json()
-        assert all(not a["can_edit"] and not a["can_reassign"] for a in accounts)
+        assert all(not a["can_edit"] and not a["can_manage"] for a in accounts)
 
 
 # --- SimpleFIN: only allowed hosts are ever contacted ------------------------------------------
@@ -302,7 +302,7 @@ def test_network_errors_dont_reach_users():
 def test_production_refuses_the_default_secret():
     with pytest.raises(RuntimeError, match="SECRET_KEY"):
         check_runtime_settings(Settings(environment="production", secret_key=""))
-    check_runtime_settings(Settings(environment="production", secret_key="a-real-secret"))
+    check_runtime_settings(Settings(environment="production", secret_key="x" * 64))
     check_runtime_settings(Settings(environment="development", secret_key=INSECURE_DEFAULT_SECRET))
 
 

@@ -43,6 +43,27 @@ def sync() -> None:
             typer.echo(f"Connection {connection.id} ({connection.label}): {status}")
 
 
+@app.command("reset-password")
+def reset_password(email: str = typer.Argument(..., help="The account's email address")) -> None:
+    """Set a new password for an account (e.g. someone forgot theirs) and sign it out everywhere."""
+    from app.core.errors import AppError
+    from app.db.session import SessionLocal, get_engine
+    from app.services import auth_service
+
+    password = typer.prompt("New password", hide_input=True, confirmation_prompt=True)
+    if not 8 <= len(password) <= 128:
+        typer.echo("The password must be 8 to 128 characters long.", err=True)
+        raise typer.Exit(1)
+    get_engine()
+    with SessionLocal() as db:
+        try:
+            auth_service.reset_password(db, email, password)
+        except AppError as exc:
+            typer.echo(exc.message, err=True)
+            raise typer.Exit(1) from exc
+    typer.echo(f"Password updated for {email}; all of its sessions were signed out.")
+
+
 @app.command()
 def backup(
     dest: Path = typer.Option(None, help="Backup folder (default: <db folder>/backups)"),

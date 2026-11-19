@@ -39,6 +39,9 @@ Open <http://localhost:3000>, create your account, then go to **Settings → Add
   saved connections can't be decrypted.
 - Newly synced accounts are private to whoever connected them. Share them from the **Accounts** page.
 - Beyond your own machine, serve FinTrack over HTTPS (e.g. Tailscale) and set `COOKIE_SECURE=true`.
+  Give it its own hostname rather than a port next to other apps (browsers share cookies across
+  ports). If a reverse proxy sits in front, set `TRUSTED_PROXIES` (see `.env.example`).
+- Forgot a password? `docker compose run --rm backend fintrack reset-password you@example.com`.
 - Once everyone in your household has signed up, set `ALLOW_SIGNUP=false` in `backend/.env`.
   Until then, anyone who can reach the server can create an account.
 - To use Postgres in Docker, set `DATABASE_URL` in the `.env` next to `docker-compose.yml`

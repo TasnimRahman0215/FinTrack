@@ -38,6 +38,14 @@ def delete_by_token_hash(db: Session, token_hash: str) -> None:
     db.execute(delete(UserSession).where(UserSession.token_hash == token_hash))
 
 
+def delete_for_user(db: Session, user_id: int, *, keep_session_id: int | None = None) -> None:
+    """End every session of a user (except `keep_session_id`): password change, sign out all."""
+    stmt = delete(UserSession).where(UserSession.user_id == user_id)
+    if keep_session_id is not None:
+        stmt = stmt.where(UserSession.id != keep_session_id)
+    db.execute(stmt)
+
+
 def delete_expired(db: Session) -> None:
     """Housekeeping, run on each login so the table doesn't grow forever."""
     db.execute(delete(UserSession).where(UserSession.expires_at < utcnow()))

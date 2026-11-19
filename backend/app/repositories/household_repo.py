@@ -54,5 +54,16 @@ def list_members(db: Session, household_id: int) -> list[tuple[HouseholdMembersh
     return [(m, u) for m, u in rows]
 
 
+def member_ids(db: Session, household_id: int) -> set[int]:
+    """User IDs of everyone currently in the household."""
+    return set(
+        db.scalars(
+            select(HouseholdMembership.user_id).where(
+                HouseholdMembership.household_id == household_id
+            )
+        ).all()
+    )
+
+
 def is_member(db: Session, *, household_id: int, user_id: int) -> bool:
     return get_membership(db, household_id=household_id, user_id=user_id) is not None

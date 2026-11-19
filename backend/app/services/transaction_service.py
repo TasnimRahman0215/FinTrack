@@ -4,6 +4,8 @@ Used by api/v1/transactions.py. Synced transactions are read-only here; later fe
 let users edit their own fields (category, notes) on them.
 """
 
+from collections.abc import Collection
+
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError, NotFound
@@ -18,7 +20,9 @@ from app.services import account_service
 from app.services.auth_service import AuthContext
 
 
-def to_out(txn: Transaction, account: Account, ctx: AuthContext) -> TransactionOut:
+def to_out(
+    txn: Transaction, account: Account, ctx: AuthContext, members: Collection[int]
+) -> TransactionOut:
     """API shape of a transaction, including its account's name for display."""
     return TransactionOut(
         id=txn.id,
@@ -33,7 +37,8 @@ def to_out(txn: Transaction, account: Account, ctx: AuthContext) -> TransactionO
         memo=txn.memo,
         notes=txn.notes,
         pending=txn.pending,
-        editable=txn.source == Source.MANUAL and account_service.permissions(ctx, account)[0],
+        editable=txn.source == Source.MANUAL
+        and account_service.permissions(ctx, account, members).can_edit,
     )
 
 
@@ -49,7 +54,10 @@ def list_transactions(
     rows, next_cursor = transaction_repo.list_page(
         db, scope.account_ids, filters, cursor=cursor, limit=limit
     )
-    return Page[TransactionOut](items=[to_out(t, a, ctx) for t, a in rows], next_cursor=next_cursor)
+    members = account_service.member_ids(db, ctx)
+    return Page[TransactionOut](
+        items=[to_out(t, a, ctx, members) for t, a in rows], next_cursor=next_cursor
+    )
 
 
 def create_manual(db: Session, ctx: AuthContext, data: TransactionCreate) -> TransactionOut:
@@ -70,7 +78,7 @@ def create_manual(db: Session, ctx: AuthContext, data: TransactionCreate) -> Tra
     db.flush()
     account_service.recompute_manual_balance(db, account)
     db.commit()
-    return to_out(txn, account, ctx)
+    return to_out(txn, account, ctx, account_service.member_ids(db, ctx))
 
 
 def update(db: Session, ctx: AuthContext, txn_id: int, data: TransactionUpdate) -> TransactionOut:
@@ -99,7 +107,7 @@ def update(db: Session, ctx: AuthContext, txn_id: int, data: TransactionUpdate) 
     if old_account.id != account.id:
         account_service.recompute_manual_balance(db, old_account)
     db.commit()
-    return to_out(txn, account, ctx)
+    return to_out(txn, account, ctx, account_service.member_ids(db, ctx))
 
 
 def delete(db: Session, ctx: AuthContext, txn_id: int) -> None:

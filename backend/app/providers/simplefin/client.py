@@ -17,7 +17,6 @@ import binascii
 import datetime as dt
 import logging
 from typing import Any
-from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 import httpx
 
@@ -31,49 +30,52 @@ TIMEOUT = httpx.Timeout(60.0, connect=15.0)
 UNREACHABLE = "Couldn't reach SimpleFIN. Please try again in a few minutes."
 
 
-def check_host(parts: SplitResult) -> None:
-    """Allow only https on the default port, to a host in SIMPLEFIN_ALLOWED_HOSTS."""
-    host = (parts.hostname or "").lower().rstrip(".")
+def parse_url(raw: str, *, error: str) -> httpx.URL:
+    """Parse with httpx (the same parser that later sends the request, so the host we check is
+    the host we contact) and allow only https on port 443 to a host in SIMPLEFIN_ALLOWED_HOSTS.
+
+    Anything httpx can't parse (control characters, bad brackets...) is reported as `error`
+    instead of crashing the request.
+    """
     try:
-        port = parts.port
-    except ValueError:  # e.g. "host:abc"
-        port = -1
+        url = httpx.URL(raw.strip())
+        host = url.raw_host.decode("ascii").lower().rstrip(".")  # IDNA-encoded, as sent
+        port = url.port
+    except (httpx.InvalidURL, ValueError, UnicodeError) as exc:
+        raise AppError(error) from exc
     allowed = get_settings().simplefin_host_list
-    if (
-        parts.scheme != "https"
-        or not host
-        or port not in (None, 443)
-        or not any(host == d or host.endswith(f".{d}") for d in allowed)
-    ):
+    if url.scheme != "https" or not host:
+        raise AppError(error)
+    if port not in (None, 443) or not any(host == d or host.endswith(f".{d}") for d in allowed):
         raise AppError(
             f"FinTrack only connects to SimpleFIN servers ({', '.join(allowed)}). "
             "To use another one, add its host to SIMPLEFIN_ALLOWED_HOSTS in backend/.env.",
             code="host_not_allowed",
         )
+    return url
 
 
 def decode_setup_token(token: str) -> str:
     """Base64-decode a setup token into its claim URL (whitespace and missing padding allowed)."""
+    not_a_token = "That doesn't look like a SimpleFIN setup token."
     cleaned = "".join(token.split())
     try:
         claim_url = base64.b64decode(cleaned + "=" * (-len(cleaned) % 4)).decode()
     except (binascii.Error, UnicodeDecodeError) as exc:
-        raise AppError("That doesn't look like a SimpleFIN setup token.") from exc
+        raise AppError(not_a_token) from exc
     if not claim_url.startswith("https://"):
-        raise AppError("That doesn't look like a SimpleFIN setup token.")
-    check_host(urlsplit(claim_url))
-    return claim_url
+        raise AppError(not_a_token)
+    return str(parse_url(claim_url, error=not_a_token))
 
 
 def split_access_url(access_url: str) -> tuple[str, tuple[str, str]]:
-    """Separate the basic-auth credentials from an access URL."""
-    parts = urlsplit(access_url.strip())
-    if parts.scheme != "https" or not parts.username or not parts.password or not parts.hostname:
+    """Separate the basic-auth credentials from an access URL: (base URL, (user, password))."""
+    url = parse_url(access_url, error="Invalid SimpleFIN access URL.")
+    if not url.username or not url.password:
         raise AppError("Invalid SimpleFIN access URL.")
-    check_host(parts)
-    netloc = parts.hostname + (f":{parts.port}" if parts.port else "")
-    base = urlunsplit((parts.scheme, netloc, parts.path.rstrip("/"), "", ""))
-    return base, (parts.username, parts.password)
+    host = url.raw_host.decode("ascii")
+    path = url.raw_path.split(b"?", 1)[0].decode("ascii").rstrip("/")
+    return f"https://{host}{path}", (url.username, url.password)
 
 
 def claim_access_url(setup_token: str, client: httpx.Client | None = None) -> str:

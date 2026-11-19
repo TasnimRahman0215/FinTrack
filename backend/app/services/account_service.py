@@ -4,6 +4,9 @@ Used by api/v1/accounts.py, by transaction_service (manual balances) and by sync
 (guess_kind for newly synced accounts).
 """
 
+from collections.abc import Collection
+from dataclasses import dataclass
+
 from sqlalchemy.orm import Session
 
 from app.core.clock import utcnow, utctoday
@@ -54,32 +57,51 @@ def guess_kind(name: str, org_name: str | None, balance_cents: int) -> AccountKi
     return AccountKind.CREDIT if balance_cents < 0 else AccountKind.OTHER
 
 
-def permissions(ctx: AuthContext, account: Account) -> tuple[bool, bool]:
-    """(can_edit, can_reassign) for the signed-in user on an account they can already see.
+@dataclass(frozen=True)
+class Permissions:
+    can_edit: bool  # everyday edits: names, type, opening balance, manual transactions
+    can_manage: bool  # owner, visibility, hiding (for everyone) and deleting
 
-    - Edit (rename, type, hide, manual transactions, delete a manual account): contributors and
-      owners, on their own accounts and joint ones. The household owner may edit any visible one.
-    - Reassign (change owner or visibility): only the account's owner or the household owner.
-      Joint accounts belong to everyone, so only the household owner can take one away from the
-      household by giving it an owner or making it private.
+
+def permissions(ctx: AuthContext, account: Account, member_ids: Collection[int]) -> Permissions:
+    """What the signed-in user may do with an account they can already see.
+
+    - Your own account: everything.
+    - A joint account: any contributor makes everyday edits; only the household owner manages it
+      (gives it an owner, makes it private, hides it for everyone or deletes it), since those
+      take it away from the whole household.
+    - Another member's account: theirs alone. Not even the household owner can edit, reassign,
+      hide or delete it.
+    - The account of someone who has left the household: the household owner looks after it.
+    Readers can't change anything.
     """
     if not ctx.has_role(Role.CONTRIBUTOR):
-        return False, False
-    if ctx.role == Role.OWNER:
-        return True, True
-    mine = account.owner_user_id == ctx.user.id
-    return mine or account.owner_user_id is None, mine
+        return Permissions(False, False)
+    owner = account.owner_user_id
+    if owner == ctx.user.id:
+        return Permissions(True, True)
+    household_owner = ctx.role == Role.OWNER
+    if owner is None:
+        return Permissions(True, household_owner)
+    if owner not in member_ids:
+        return Permissions(household_owner, household_owner)
+    return Permissions(False, False)
 
 
-def to_out(account: Account, ctx: AuthContext) -> AccountOut:
-    can_edit, can_reassign = permissions(ctx, account)
+def member_ids(db: Session, ctx: AuthContext) -> set[int]:
+    return household_repo.member_ids(db, ctx.household_id)
+
+
+def to_out(account: Account, ctx: AuthContext, members: Collection[int]) -> AccountOut:
+    perms = permissions(ctx, account, members)
     out = AccountOut.model_validate(account)
-    out.can_edit, out.can_reassign = can_edit, can_reassign
+    out.can_edit, out.can_manage = perms.can_edit, perms.can_manage
     return out
 
 
 def list_accounts(db: Session, ctx: AuthContext, scope: Scope) -> list[AccountOut]:
-    return [to_out(a, ctx) for a in account_repo.list_by_ids(db, scope.account_ids)]
+    members = member_ids(db, ctx)
+    return [to_out(a, ctx, members) for a in account_repo.list_by_ids(db, scope.account_ids)]
 
 
 def get_visible_account(db: Session, ctx: AuthContext, account_id: int) -> Account:
@@ -93,11 +115,18 @@ def get_visible_account(db: Session, ctx: AuthContext, account_id: int) -> Accou
 
 
 def get_editable_account(db: Session, ctx: AuthContext, account_id: int) -> Account:
-    """Like get_visible_account, but 403 unless the user may edit it (see `permissions`)."""
+    """Like get_visible_account, but 403 unless the user may make everyday edits to it."""
     account = get_visible_account(db, ctx, account_id)
-    if not permissions(ctx, account)[0]:
-        raise Forbidden("Only the account's owner or the household owner can change this account.")
+    if not permissions(ctx, account, member_ids(db, ctx)).can_edit:
+        raise Forbidden(_NOT_YOURS)
     return account
+
+
+_NOT_YOURS = "Only the account's owner can change this account."
+_MANAGE_ONLY = (
+    "Only the account's owner can change who owns it, who can see it, hide it or delete it "
+    "(for a joint account, only the household owner)."
+)
 
 
 def create_manual(db: Session, ctx: AuthContext, data: AccountCreate) -> AccountOut:
@@ -121,29 +150,44 @@ def create_manual(db: Session, ctx: AuthContext, data: AccountCreate) -> Account
     )
     recompute_manual_balance(db, account)
     db.commit()
-    return to_out(account, ctx)
+    return to_out(account, ctx, member_ids(db, ctx))
 
 
 def update(db: Session, ctx: AuthContext, account_id: int, data: AccountUpdate) -> AccountOut:
-    """Partial update: only fields present in the request body are changed."""
-    account = get_editable_account(db, ctx, account_id)
+    """Partial update: only fields present in the request body are changed.
+
+    Owner, visibility and hidden need `can_manage`, but only when they actually change, so a
+    form that re-sends the current values doesn't need extra rights.
+    """
+    account = get_visible_account(db, ctx, account_id)
+    members = member_ids(db, ctx)
+    perms = permissions(ctx, account, members)
+    if not (perms.can_edit or perms.can_manage):
+        raise Forbidden(_NOT_YOURS)
     fields = data.model_fields_set
 
-    if ({"owner_user_id", "visibility"} & fields) and not permissions(ctx, account)[1]:
-        raise Forbidden("Only the account's owner can change who owns it or who can see it.")
-    if "owner_user_id" in fields:
+    changes_owner = "owner_user_id" in fields and data.owner_user_id != account.owner_user_id
+    changes_visibility = data.visibility is not None and data.visibility != account.visibility
+    changes_hidden = data.is_hidden is not None and data.is_hidden != account.is_hidden
+    if (changes_owner or changes_visibility or changes_hidden) and not perms.can_manage:
+        raise Forbidden(_MANAGE_ONLY)
+    edits = {"display_name", "kind", "name", "opening_balance_cents"} & fields
+    if edits and not perms.can_edit:
+        raise Forbidden(_NOT_YOURS)
+
+    if changes_owner:
         _check_owner(db, ctx, data.owner_user_id)
         account.owner_user_id = data.owner_user_id
-    if "visibility" in fields and data.visibility is not None:
+    if changes_visibility:
         account.visibility = data.visibility
     if account.owner_user_id is None:
         account.visibility = Visibility.SHARED  # joint accounts are always shared
+    if changes_hidden:
+        account.is_hidden = data.is_hidden
     if "display_name" in fields:
         account.display_name = data.display_name or None
     if "kind" in fields and data.kind is not None:
         account.kind = data.kind
-    if "is_hidden" in fields and data.is_hidden is not None:
-        account.is_hidden = data.is_hidden
 
     manual_only = {"name", "opening_balance_cents"} & fields
     if manual_only and account.source != Source.MANUAL:
@@ -155,11 +199,13 @@ def update(db: Session, ctx: AuthContext, account_id: int, data: AccountUpdate) 
         recompute_manual_balance(db, account)
 
     db.commit()
-    return to_out(account, ctx)
+    return to_out(account, ctx, members)
 
 
 def delete_manual(db: Session, ctx: AuthContext, account_id: int) -> None:
-    account = get_editable_account(db, ctx, account_id)
+    account = get_visible_account(db, ctx, account_id)
+    if not permissions(ctx, account, member_ids(db, ctx)).can_manage:
+        raise Forbidden(_MANAGE_ONLY)
     if account.source != Source.MANUAL:
         raise AppError("Synced accounts can't be deleted; hide them or remove the connection.")
     db.delete(account)

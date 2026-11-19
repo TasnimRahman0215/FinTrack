@@ -49,6 +49,11 @@ class TooManyRequests(AppError):
     code = "rate_limited"
 
 
+class ServiceBusy(AppError):
+    status_code = 503
+    code = "busy"
+
+
 class ConfigError(AppError):
     status_code = 500
     code = "config_error"

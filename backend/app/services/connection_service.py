@@ -29,19 +29,22 @@ OTHERS_ERROR = "This connection reported a problem. The person who added it can 
 def can_manage(db: Session, ctx: AuthContext, connection: Connection) -> bool:
     """The member who added a connection manages it: sees its full details and can remove it.
 
-    If that person has left the household (or their account was deleted), the household owner
-    takes over, so a connection can never become impossible to remove.
+    If that person can't manage it any more (they left, their account was deleted, or they're
+    now a reader), the household owner takes over, so a connection never becomes impossible to
+    remove.
     """
     if not ctx.has_role(Role.CONTRIBUTOR):
         return False
     if connection.added_by_user_id == ctx.user.id:
         return True
-    return ctx.role == Role.OWNER and (
-        connection.added_by_user_id is None
-        or not household_repo.is_member(
-            db, household_id=ctx.household_id, user_id=connection.added_by_user_id
-        )
+    if ctx.role != Role.OWNER:
+        return False
+    if connection.added_by_user_id is None:
+        return True
+    adder = household_repo.get_membership(
+        db, household_id=ctx.household_id, user_id=connection.added_by_user_id
     )
+    return adder is None or Role(adder.role) == Role.READER
 
 
 def managed_connection_ids(db: Session, ctx: AuthContext) -> set[int]:

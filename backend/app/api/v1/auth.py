@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import client_ip, get_auth, get_db
 from app.core.config import get_settings
 from app.core.rate_limit import RateLimiter
-from app.schemas.auth import AuthConfigOut, LoginIn, MeOut, SignupIn
+from app.schemas.auth import AuthConfigOut, LoginIn, MeOut, PasswordChangeIn, SignupIn
 from app.services import auth_service
 from app.services.auth_service import AuthContext
 
@@ -23,12 +23,14 @@ _login_per_ip = RateLimiter(max_hits=30, window_seconds=300)
 _login_per_email_ip = RateLimiter(max_hits=10, window_seconds=300)
 _login_per_email = RateLimiter(max_hits=100, window_seconds=900)
 _signup_per_ip = RateLimiter(max_hits=10, window_seconds=3600)
+# Changing a password re-checks the current one, so it's a password-guessing path too.
+_password_change_per_user = RateLimiter(max_hits=5, window_seconds=900)
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
     s = get_settings()
     response.set_cookie(
-        s.cookie_name,
+        s.session_cookie_name,
         token,
         max_age=s.session_days * 86400,
         httponly=True,
@@ -70,14 +72,36 @@ def login(
     return auth_service.me(db, ctx)
 
 
+def _clear_session_cookie(response: Response) -> None:
+    s = get_settings()
+    response.delete_cookie(
+        s.session_cookie_name, path="/", secure=s.cookie_secure, samesite=s.cookie_samesite
+    )
+
+
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(request: Request, response: Response, db: Session = Depends(get_db)) -> None:
     """End this session (server-side too) and clear the cookie."""
-    s = get_settings()
-    auth_service.logout(db, request.cookies.get(s.cookie_name))
-    response.delete_cookie(
-        s.cookie_name, path="/", secure=s.cookie_secure, samesite=s.cookie_samesite
-    )
+    auth_service.logout(db, request.cookies.get(get_settings().session_cookie_name))
+    _clear_session_cookie(response)
+
+
+@router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT)
+def logout_all(
+    response: Response, ctx: AuthContext = Depends(get_auth), db: Session = Depends(get_db)
+) -> None:
+    """Sign out on every device (e.g. after losing a phone), this one included."""
+    auth_service.logout_everywhere(db, ctx)
+    _clear_session_cookie(response)
+
+
+@router.post("/password", status_code=status.HTTP_204_NO_CONTENT)
+def change_password(
+    data: PasswordChangeIn, ctx: AuthContext = Depends(get_auth), db: Session = Depends(get_db)
+) -> None:
+    """Change your password. Every other session is signed out; this one stays signed in."""
+    _password_change_per_user.hit(str(ctx.user.id))
+    auth_service.change_password(db, ctx, data)
 
 
 @router.get("/me", response_model=MeOut)

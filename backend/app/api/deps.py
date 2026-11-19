@@ -22,7 +22,7 @@ __all__ = ["get_db", "get_auth", "require_role", "get_scope", "get_scope_with_hi
 
 def get_auth(request: Request, db: Session = Depends(get_db)) -> AuthContext:
     """The signed-in user and their household/role, from the session cookie. 401 if missing."""
-    token = request.cookies.get(get_settings().cookie_name)
+    token = request.cookies.get(get_settings().session_cookie_name)
     if not token:
         raise Unauthorized("Please sign in.")
     ctx = auth_service.resolve_session(db, token)

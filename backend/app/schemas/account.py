@@ -28,8 +28,8 @@ class AccountOut(ORMModel):
     balance_as_of: datetime | None
     opening_balance_cents: int
     # What the signed-in user may do with this account (see account_service.permissions).
-    can_edit: bool = False
-    can_reassign: bool = False
+    can_edit: bool = False  # names, type, opening balance, manual transactions
+    can_manage: bool = False  # owner, visibility, hidden, delete
 
 
 class AccountCreate(BaseModel):

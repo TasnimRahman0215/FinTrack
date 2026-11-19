@@ -26,6 +26,9 @@ services:
     image: fintrack-frontend:local
     environment:
       BACKEND_URL: http://backend:8000
+      # Behind another reverse proxy (Caddy, Tailscale serve...)? List its address(es) in ./.env
+      # so login rate limits see each user's real IP. Empty = browsers connect directly.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
     ports:
       - "${FRONTEND_PORT:-3000}:8080"
     depends_on:

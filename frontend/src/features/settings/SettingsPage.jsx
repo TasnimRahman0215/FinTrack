@@ -5,11 +5,13 @@ import { Button } from '../../components/ui/Button'
 import { Card, CardBody, CardHeader } from '../../components/ui/Card'
 import { useAuth } from '../../context/AuthContext'
 import { ROLE_LABEL } from '../../lib/labels'
+import { AccountSecuritySection } from './AccountSecuritySection'
 import { ConnectionsSection } from './ConnectionsSection'
 import { MembersSection } from './MembersSection'
 import { SyncStatus } from './SyncStatus'
 
-/** /settings. Connections and sync history on the left; household and profile on the right. */
+/** /settings. Connections and sync history on the left; household, profile and sign-in
+ * security on the right. */
 export function SettingsPage() {
   const { user, role, logout } = useAuth()
   return (
@@ -36,6 +38,7 @@ export function SettingsPage() {
               </Button>
             </CardBody>
           </Card>
+          <AccountSecuritySection />
         </div>
       </div>
     </>

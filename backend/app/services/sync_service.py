@@ -25,7 +25,13 @@ from app.models.enums import ConnectionStatus, SyncStatus, Visibility
 from app.pipeline.registry import run_pipeline
 from app.providers.base import FetchResult, Provider, ProviderAccount, ProviderTransaction
 from app.providers.registry import get_provider
-from app.repositories import account_repo, balance_repo, connection_repo, transaction_repo
+from app.repositories import (
+    account_repo,
+    balance_repo,
+    connection_repo,
+    sync_run_repo,
+    transaction_repo,
+)
 from app.schemas.sync import SyncSkipped, SyncStartOut
 from app.services.account_service import guess_kind
 
@@ -296,10 +302,21 @@ def start_household_sync(db: Session, household_id: int) -> SyncStartOut:
     """'Sync now': claim every connection in a household that isn't syncing or in its cooldown
     (which keeps us under SimpleFIN's ~24 requests/day/connection). The caller runs the claimed
     ones with `run_claimed` in the background, so the request returns at once."""
-    cooldown = timedelta(minutes=get_settings().sync_cooldown_minutes)
+    settings = get_settings()
+    cooldown = timedelta(minutes=settings.sync_cooldown_minutes)
+    day_ago = utcnow() - timedelta(days=1)
     started: list[int] = []
     skipped: list[SyncSkipped] = []
     for connection, _ in connection_repo.list_for_household(db, household_id):
+        manual_today = sync_run_repo.count_since(db, connection.id, trigger="manual", since=day_ago)
+        if manual_today >= settings.sync_manual_daily_limit:
+            skipped.append(
+                SyncSkipped(
+                    connection_id=connection.id,
+                    reason="Daily limit for manual syncs reached; automatic syncs continue.",
+                )
+            )
+            continue
         if try_claim(db, connection, min_gap=cooldown):
             started.append(connection.id)
             continue

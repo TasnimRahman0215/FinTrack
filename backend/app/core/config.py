@@ -12,6 +12,7 @@ from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 INSECURE_DEFAULT_SECRET = "dev-only-insecure-secret-change-me"
+MIN_SECRET_LENGTH = 32  # `fintrack gen-keys` produces 64 characters
 
 
 class Settings(BaseSettings):
@@ -35,7 +36,12 @@ class Settings(BaseSettings):
     cookie_name: str = "fintrack_session"
     cookie_secure: bool = False  # set true when served over HTTPS
     cookie_samesite: Literal["lax", "strict", "none"] = "lax"
-    session_days: int = 30
+    session_days: int = 30  # idle sessions end after this; each visit extends them
+    session_max_days: int = 90  # ...but no session lives longer than this, active or not
+
+    # Password hashing (argon2) uses ~64 MiB of RAM per hash. Capping how many run at once keeps
+    # a burst of logins from exhausting memory on small machines (a Raspberry Pi, a 1 GB VM).
+    password_hash_concurrency: int = 2
 
     # The very first account can always be created; after that this controls open sign-ups.
     allow_signup: bool = True
@@ -46,6 +52,9 @@ class Settings(BaseSettings):
     sync_cooldown_minutes: int = 15  # minimum gap between "Sync now" clicks per connection
     initial_sync_days: int = 90  # history requested on the first sync
     sync_overlap_days: int = 14  # re-fetch this far back each sync to catch late-posting items
+    # "Sync now" runs allowed per connection per 24 h. With the 4 scheduled syncs a day this stays
+    # under SimpleFIN's ~24 requests/day/connection guideline.
+    sync_manual_daily_limit: int = 12
 
     # The only hosts FinTrack will contact for SimpleFIN (a domain also allows its subdomains).
     # Stops a pasted setup token or access URL from making the server call arbitrary addresses.
@@ -56,6 +65,31 @@ class Settings(BaseSettings):
     def _blank_secret_uses_default(cls, value: str) -> str:
         # An empty SECRET_KEY= line in .env falls back to the default (and logs a warning).
         return value or INSECURE_DEFAULT_SECRET
+
+    @field_validator("cors_origins")
+    @classmethod
+    def _exact_origins_only(cls, value: str) -> str:
+        """Only exact origins like https://fintrack.example.com.
+
+        "*" is refused: with credentials allowed, the CORS middleware would answer *any* website
+        with that website's own origin, letting every page you visit read and change your data.
+        """
+        for origin in (o.strip() for o in value.split(",")):
+            if not origin:
+                continue
+            scheme, sep, rest = origin.partition("://")
+            if (
+                "*" in origin
+                or not sep
+                or scheme not in ("http", "https")
+                or not rest
+                or "/" in rest.rstrip("/")
+            ):
+                raise ValueError(
+                    f"CORS_ORIGINS entry {origin!r} isn't an exact origin. List full origins "
+                    "such as https://fintrack.example.com, comma-separated; '*' is not allowed."
+                )
+        return value
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -73,18 +107,35 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.environment == "production"
 
+    @property
+    def session_cookie_name(self) -> str:
+        """Over HTTPS the cookie gets the __Host- prefix: browsers then accept it only with
+        Secure, Path=/ and no Domain, so it's bound to exactly this host and can't be set or
+        overwritten by other sites or subdomains. (Browsers still send cookies to other *ports* of
+        the same host, so give FinTrack its own hostname; see docs/architecture.md#security.)"""
+        if self.cookie_secure and not self.cookie_name.startswith("__Host-"):
+            return f"__Host-{self.cookie_name}"
+        return self.cookie_name
+
 
 def check_runtime_settings(settings: Settings) -> None:
-    """Refuse to run in production with the published default SECRET_KEY.
+    """Refuse to run in production with the published default or a short SECRET_KEY.
 
     Called at startup by app/main.py and app/worker.py. Development and tests only get a warning
     (logged by main.py), so a fresh checkout still starts.
     """
-    if settings.is_production and settings.secret_key == INSECURE_DEFAULT_SECRET:
+    if not settings.is_production:
+        return
+    if settings.secret_key == INSECURE_DEFAULT_SECRET:
         raise RuntimeError(
             "SECRET_KEY is not set. Run `fintrack gen-keys` (Docker: "
             "`docker compose run --rm backend fintrack gen-keys`) and paste the values into "
             "backend/.env."
+        )
+    if len(settings.secret_key) < MIN_SECRET_LENGTH:
+        raise RuntimeError(
+            f"SECRET_KEY is too short ({len(settings.secret_key)} characters; at least "
+            f"{MIN_SECRET_LENGTH} required). Generate one with `fintrack gen-keys`."
         )
 
 

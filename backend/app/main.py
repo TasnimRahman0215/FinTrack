@@ -81,17 +81,20 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def csrf_guard(request: Request, call_next):
+        is_api = request.url.path.startswith("/api/")
         # Browsers can't add custom headers to cross-site form posts, and cross-origin fetches
         # with them need a CORS preflight. Requiring this header on writes blocks CSRF.
-        if (
-            request.method not in SAFE_METHODS
-            and request.url.path.startswith("/api/")
-            and CSRF_HEADER not in request.headers
-        ):
-            return JSONResponse(
+        if is_api and request.method not in SAFE_METHODS and CSRF_HEADER not in request.headers:
+            response = JSONResponse(
                 {"detail": "Missing X-Requested-With header.", "code": "csrf"}, status_code=403
             )
-        return await call_next(request)
+        else:
+            response = await call_next(request)
+        # API responses hold financial data: never store them in browser or proxy caches
+        # (e.g. so the back button on a shared computer can't show them after sign-out).
+        if is_api:
+            response.headers.setdefault("Cache-Control", "no-store")
+        return response
 
     register_exception_handlers(app)
     app.include_router(api_router, prefix="/api/v1")

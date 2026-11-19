@@ -13,7 +13,10 @@ RUN npm run build
 FROM nginxinc/nginx-unprivileged:1.27-alpine
 # The image renders /etc/nginx/templates/*.template with env vars at startup.
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+# Optional TRUSTED_PROXIES support (see the script).
+COPY --chmod=755 docker/40-fintrack-real-ip.sh /docker-entrypoint.d/40-fintrack-real-ip.sh
 COPY --from=build /app/dist /usr/share/nginx/html
 ENV BACKEND_URL=http://backend:8000 \
-    CSP_CONNECT_SRC="'self'"
+    CSP_CONNECT_SRC="'self'" \
+    TRUSTED_PROXIES=""
 EXPOSE 8080

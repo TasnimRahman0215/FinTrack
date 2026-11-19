@@ -13,11 +13,11 @@ from sqlalchemy.orm import Session
 from app.core import security
 from app.core.clock import utcnow
 from app.core.config import get_settings
-from app.core.errors import Conflict, Forbidden, Unauthorized
+from app.core.errors import AppError, Conflict, Forbidden, NotFound, Unauthorized
 from app.models import Household, User, UserSession
 from app.models.enums import ROLE_RANK, Role
 from app.repositories import household_repo, session_repo, user_repo
-from app.schemas.auth import HouseholdBrief, LoginIn, MeOut, SignupIn, UserOut
+from app.schemas.auth import HouseholdBrief, LoginIn, MeOut, PasswordChangeIn, SignupIn, UserOut
 
 
 @dataclass
@@ -99,8 +99,12 @@ def logout(db: Session, token: str | None) -> None:
 def resolve_session(db: Session, token: str) -> AuthContext | None:
     """Session cookie value -> AuthContext, or None if the session is unknown or expired."""
     session = session_repo.get_by_token_hash(db, security.hash_token(token))
+    if session is None:
+        return None
     now = utcnow()
-    if session is None or session.expires_at <= now:
+    settings = get_settings()
+    hard_limit = session.created_at + timedelta(days=settings.session_max_days)
+    if session.expires_at <= now or hard_limit <= now:
         return None
 
     membership = None
@@ -115,10 +119,11 @@ def resolve_session(db: Session, token: str) -> AuthContext | None:
         session.active_household_id = membership.household_id
         db.commit()
 
-    # Sliding expiry: extend once less than half the lifetime remains.
-    lifetime = timedelta(days=get_settings().session_days)
-    if session.expires_at - now < lifetime / 2:
-        session.expires_at = now + lifetime
+    # Sliding expiry: extend once less than half the lifetime remains, but never past the hard
+    # limit (SESSION_MAX_DAYS), so a stolen cookie can't be kept alive forever by using it.
+    lifetime = timedelta(days=settings.session_days)
+    if session.expires_at - now < lifetime / 2 and session.expires_at < hard_limit:
+        session.expires_at = min(now + lifetime, hard_limit)
         db.commit()
 
     return AuthContext(
@@ -127,6 +132,34 @@ def resolve_session(db: Session, token: str) -> AuthContext | None:
         household_id=membership.household_id,
         role=Role(membership.role),
     )
+
+
+def change_password(db: Session, ctx: AuthContext, data: PasswordChangeIn) -> None:
+    """Set a new password after checking the current one, and end every *other* session, so a
+    leaked password or a stolen cookie stops working everywhere else."""
+    if not security.verify_password(ctx.user.password_hash, data.current_password):
+        raise AppError("Your current password is incorrect.", code="invalid_credentials")
+    if data.new_password == data.current_password:
+        raise AppError("Choose a password different from your current one.")
+    ctx.user.password_hash = security.hash_password(data.new_password)
+    session_repo.delete_for_user(db, ctx.user.id, keep_session_id=ctx.session.id)
+    db.commit()
+
+
+def logout_everywhere(db: Session, ctx: AuthContext) -> None:
+    """End every session of the signed-in user, this one included."""
+    session_repo.delete_for_user(db, ctx.user.id)
+    db.commit()
+
+
+def reset_password(db: Session, email: str, new_password: str) -> None:
+    """Admin recovery (`fintrack reset-password`): set a password and end all its sessions."""
+    user = user_repo.get_by_email(db, email)
+    if user is None:
+        raise NotFound(f"No account with the email {email}.")
+    user.password_hash = security.hash_password(new_password)
+    session_repo.delete_for_user(db, user.id)
+    db.commit()
 
 
 def me(db: Session, ctx: AuthContext) -> MeOut:

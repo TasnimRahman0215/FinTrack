@@ -25,7 +25,8 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         # Overwrite (never append to) X-Forwarded-For: the backend rate-limits logins by this
-        # address, so a client must not be able to supply its own.
+        # address, so a client must not be able to supply its own. With TRUSTED_PROXIES set,
+        # $remote_addr is already the real client as reported by those proxies (real-ip.conf).
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 120s;  # connecting a bank claims the token with SimpleFIN first

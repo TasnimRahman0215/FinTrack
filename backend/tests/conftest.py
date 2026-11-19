@@ -17,7 +17,7 @@ os.environ.update(
     {
         "ENVIRONMENT": "test",
         "RUN_SCHEDULER": "false",
-        "SECRET_KEY": "test-secret-key",
+        "SECRET_KEY": "test-secret-key-long-enough-for-production-checks",
         "ENCRYPTION_KEY": Fernet.generate_key().decode(),
         "ALLOW_SIGNUP": "true",
         "DATABASE_URL": "sqlite:///:memory:",  # replaced per test by the `engine` fixture
@@ -26,11 +26,12 @@ os.environ.update(
     }
 )
 
+import httpx  # noqa: E402
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
-from app.core import rate_limit  # noqa: E402
+from app.core import rate_limit, security  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import SessionLocal, init_engine  # noqa: E402
@@ -62,8 +63,20 @@ def _reset_state():
     """Isolate tests: clear rate-limit counters and re-read settings for each test."""
     rate_limit.reset_all()
     get_settings.cache_clear()
+    security.reset_hash_slots()
     yield
     get_settings.cache_clear()
+    security.reset_hash_slots()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_network(monkeypatch):
+    """Fail any test that would make a real HTTP request (mock transports still work)."""
+
+    def refuse(self, request):
+        raise AssertionError(f"Test tried to reach the network: {request.url}")
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", refuse)
 
 
 def make_client() -> TestClient:
