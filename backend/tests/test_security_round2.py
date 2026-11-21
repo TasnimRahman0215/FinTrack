@@ -24,7 +24,7 @@ from app.main import app
 from app.models import Connection, HouseholdMembership, SyncRun, UserSession
 from app.models.enums import Role
 from app.services import sync_service
-from tests.conftest import PASSWORD, make_client
+from tests.conftest import PASSWORD, fake_password, make_client
 
 
 def ids(client, scope="household"):
@@ -190,6 +190,7 @@ def test_plain_http_keeps_the_plain_cookie_name(client):
 
 
 def test_changing_password_signs_out_other_sessions(engine, client, owner):
+    new_password = fake_password()
     email = owner["user"]["email"]
     with make_client() as phone:
         assert (
@@ -201,14 +202,14 @@ def test_changing_password_signs_out_other_sessions(engine, client, owner):
 
         wrong = client.post(
             "/api/v1/auth/password",
-            json={"current_password": "not-it", "new_password": "a-brand-new-password"},
+            json={"current_password": fake_password(), "new_password": new_password},
         )
         assert wrong.status_code == 400
         assert phone.get("/api/v1/auth/me").status_code == 200  # nothing changed yet
 
         ok = client.post(
             "/api/v1/auth/password",
-            json={"current_password": PASSWORD, "new_password": "a-brand-new-password"},
+            json={"current_password": PASSWORD, "new_password": new_password},
         )
         assert ok.status_code == 204
         assert client.get("/api/v1/auth/me").status_code == 200  # this session stays
@@ -217,14 +218,12 @@ def test_changing_password_signs_out_other_sessions(engine, client, owner):
     assert client.post("/api/v1/auth/logout").status_code == 204
     old = client.post("/api/v1/auth/login", json={"email": email, "password": PASSWORD})
     assert old.status_code == 401
-    new = client.post(
-        "/api/v1/auth/login", json={"email": email, "password": "a-brand-new-password"}
-    )
+    new = client.post("/api/v1/auth/login", json={"email": email, "password": new_password})
     assert new.status_code == 200
 
 
 def test_password_change_is_rate_limited(client, owner):
-    body = {"current_password": "wrong-guess", "new_password": "a-brand-new-password"}
+    body = {"current_password": fake_password(), "new_password": fake_password()}
     codes = [client.post("/api/v1/auth/password", json=body).status_code for _ in range(6)]
     assert codes == [400] * 5 + [429]
 
@@ -258,21 +257,23 @@ def test_sliding_renewal_never_passes_the_hard_limit(client, owner, db):
 
 
 def test_cli_reset_password(engine, client, owner, db):
+    new_password = fake_password()
     runner = CliRunner()
     result = runner.invoke(
         cli_app,
         ["reset-password", owner["user"]["email"]],
-        input="reset-by-admin-123\nreset-by-admin-123\n",
+        input=f"{new_password}\n{new_password}\n",
     )
     assert result.exit_code == 0, result.output
     assert client.get("/api/v1/auth/me").status_code == 401  # all sessions ended
     resp = client.post(
         "/api/v1/auth/login",
-        json={"email": owner["user"]["email"], "password": "reset-by-admin-123"},
+        json={"email": owner["user"]["email"], "password": new_password},
     )
     assert resp.status_code == 200
 
-    password_twice = "long-enough-pw\nlong-enough-pw\n"
+    other = fake_password()
+    password_twice = f"{other}\n{other}\n"
     missing = runner.invoke(cli_app, ["reset-password", "nobody@example.com"], input=password_twice)
     assert missing.exit_code == 1
 

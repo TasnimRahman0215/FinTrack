@@ -21,7 +21,7 @@ from app.db.session import SessionLocal, init_engine
 from app.models import Account, SecurityEvent, Transaction
 from app.models.enums import Source
 from app.services import sync_service
-from tests.conftest import PASSWORD, make_client
+from tests.conftest import PASSWORD, fake_password, make_client
 from tests.test_sync import FakeProvider
 
 REPO = Path(__file__).resolve().parents[2]
@@ -91,12 +91,13 @@ def test_database_errors_hide_transaction_values(db, owner, caplog):
 
 
 def test_validation_errors_dont_echo_passwords(client, owner):
+    too_short = fake_password()[:7]  # random, so finding it in the response means it was echoed
     resp = client.post(
         "/api/v1/auth/password",
-        json={"current_password": PASSWORD, "new_password": "secret7"},
+        json={"current_password": PASSWORD, "new_password": too_short},
     )
     assert resp.status_code == 422
-    assert "secret7" not in resp.text and '"input"' not in resp.text
+    assert too_short not in resp.text and '"input"' not in resp.text
     assert resp.json()["detail"][0]["loc"] == ["body", "new_password"]  # still says what failed
 
     with make_client() as c:
@@ -154,7 +155,7 @@ def events(client):
 def test_sign_ins_and_failures_are_recorded_for_the_account_owner(engine, client, owner):
     email = owner["user"]["email"]
     with make_client() as attacker:
-        attacker.post("/api/v1/auth/login", json={"email": email, "password": "guess-1"})
+        attacker.post("/api/v1/auth/login", json={"email": email, "password": fake_password()})
         attacker.post("/api/v1/auth/login", json={"email": "nobody@example.com", "password": "x"})
     with make_client() as phone:
         phone.post("/api/v1/auth/login", json={"email": email, "password": PASSWORD})
@@ -178,7 +179,7 @@ def test_activity_only_shows_your_own_events(client, owner, partner):
     partner_client, _ = partner
     partner_client.post(
         "/api/v1/auth/password",
-        json={"current_password": PASSWORD, "new_password": "partner-new-pw-1"},
+        json={"current_password": PASSWORD, "new_password": fake_password()},
     )
     assert "password_changed" in events(partner_client)
     assert "password_changed" not in events(client)
@@ -213,7 +214,8 @@ def test_rate_limited_logins_are_logged_but_not_stored(engine, client, owner, db
     caplog.set_level(logging.WARNING, logger="fintrack.audit")
     for _ in range(11):
         client.post(
-            "/api/v1/auth/login", json={"email": owner["user"]["email"], "password": "wrong"}
+            "/api/v1/auth/login",
+            json={"email": owner["user"]["email"], "password": fake_password()},
         )
     assert any("login_rate_limited" in r.getMessage() for r in caplog.records)
     assert db.query(SecurityEvent).filter(SecurityEvent.event.like("%rate%")).count() == 0

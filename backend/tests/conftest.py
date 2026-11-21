@@ -7,6 +7,7 @@ No test touches your real database or the network.
 
 import json
 import os
+import secrets
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -17,7 +18,7 @@ os.environ.update(
     {
         "ENVIRONMENT": "test",
         "RUN_SCHEDULER": "false",
-        "SECRET_KEY": "test-secret-key-long-enough-for-production-checks",
+        "SECRET_KEY": secrets.token_urlsafe(48),  # random per run, like `fintrack gen-keys`
         "ENCRYPTION_KEY": Fernet.generate_key().decode(),
         "ALLOW_SIGNUP": "true",
         "DATABASE_URL": "sqlite:///:memory:",  # replaced per test by the `engine` fixture
@@ -41,7 +42,18 @@ from app.models.enums import Role  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CLIENT_HEADERS = {"X-Requested-With": "fintrack"}
-PASSWORD = "correct-horse-battery"
+
+
+def fake_password() -> str:
+    """A random password for a throwaway test user.
+
+    Generated at runtime so the repository holds no password-like literals: secret scanners
+    (e.g. GitGuardian) can't tell test passwords from real ones.
+    """
+    return f"test-{secrets.token_urlsafe(12)}"
+
+
+PASSWORD = fake_password()  # the password of the `owner` / `partner` fixture users
 
 
 @pytest.fixture

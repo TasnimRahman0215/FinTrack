@@ -2,7 +2,7 @@
 
 from app.models import Household, HouseholdMembership, User
 from app.models.enums import Role
-from tests.conftest import PASSWORD, make_client, signup
+from tests.conftest import PASSWORD, fake_password, make_client, signup
 
 
 def test_signup_creates_user_household_and_owner_membership(client, db):
@@ -36,7 +36,7 @@ def test_duplicate_email_rejected(client):
 def test_short_password_rejected(client):
     resp = client.post(
         "/api/v1/auth/signup",
-        json={"email": "a@example.com", "display_name": "A", "password": "short"},
+        json={"email": "a@example.com", "display_name": "A", "password": "s" * 5},
     )
     assert resp.status_code == 422
 
@@ -47,7 +47,7 @@ def test_login_logout_flow(client):
     assert client.get("/api/v1/auth/me").status_code == 401
 
     bad = client.post(
-        "/api/v1/auth/login", json={"email": "alex@example.com", "password": "nope-nope"}
+        "/api/v1/auth/login", json={"email": "alex@example.com", "password": fake_password()}
     )
     assert bad.status_code == 401
 
@@ -59,7 +59,7 @@ def test_login_logout_flow(client):
 
 def test_unknown_email_gets_same_error(client):
     resp = client.post(
-        "/api/v1/auth/login", json={"email": "ghost@example.com", "password": "whatever1"}
+        "/api/v1/auth/login", json={"email": "ghost@example.com", "password": fake_password()}
     )
     assert resp.status_code == 401
     assert resp.json()["code"] == "invalid_credentials"
@@ -103,7 +103,7 @@ def test_login_rate_limited(client):
     signup(client)
     codes = [
         client.post(
-            "/api/v1/auth/login", json={"email": "alex@example.com", "password": "wrong-pass"}
+            "/api/v1/auth/login", json={"email": "alex@example.com", "password": fake_password()}
         ).status_code
         for _ in range(11)
     ]
