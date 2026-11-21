@@ -11,4 +11,6 @@ export const authApi = {
   logoutAll: () => http.post('/v1/auth/logout-all'),
   // { current_password, new_password }. Other sessions are signed out; this one stays.
   changePassword: (data) => http.post('/v1/auth/password', data),
+  // Your recent sign-ins, failed sign-ins and security changes (newest first).
+  activity: () => http.get('/v1/auth/activity'),
 }

@@ -6,7 +6,7 @@ Called by frontend/src/api/accounts.js.
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_auth, get_db, get_scope_with_hidden, require_role
+from app.api.deps import PathId, get_auth, get_db, get_scope_with_hidden, require_role
 from app.core.scope import Scope
 from app.models.enums import Role
 from app.schemas.account import AccountCreate, AccountOut, AccountUpdate
@@ -38,7 +38,7 @@ def create_manual_account(
 
 @router.patch("/{account_id}", response_model=AccountOut)
 def update_account(
-    account_id: int,
+    account_id: PathId,
     data: AccountUpdate,
     ctx: AuthContext = Depends(require_role(Role.CONTRIBUTOR)),
     db: Session = Depends(get_db),
@@ -49,7 +49,7 @@ def update_account(
 
 @router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_manual_account(
-    account_id: int,
+    account_id: PathId,
     ctx: AuthContext = Depends(require_role(Role.CONTRIBUTOR)),
     db: Session = Depends(get_db),
 ) -> None:

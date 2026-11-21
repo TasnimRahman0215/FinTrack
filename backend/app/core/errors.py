@@ -6,6 +6,8 @@ machine-readable value the frontend can branch on.
 """
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 
@@ -78,3 +80,14 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _handle_app_error(_: Request, exc: AppError) -> JSONResponse:
         return JSONResponse({"detail": exc.message, "code": exc.code}, status_code=exc.status_code)
+
+    @app.exception_handler(RequestValidationError)
+    async def _handle_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # FastAPI's default response echoes each rejected value ("input"), which can be a
+        # password or a SimpleFIN token. Keep where and why it failed, never the value itself.
+        errors = [
+            {k: v for k, v in error.items() if k not in ("input", "url")} for error in exc.errors()
+        ]
+        return JSONResponse(
+            {"detail": jsonable_encoder(errors), "code": "validation_error"}, status_code=422
+        )

@@ -1,4 +1,4 @@
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { KeyRound, LogOut } from 'lucide-react'
 import { useState } from 'react'
 
@@ -8,6 +8,8 @@ import { Card, CardBody, CardHeader } from '../../components/ui/Card'
 import { ErrorMessage } from '../../components/ui/Feedback'
 import { Field, Input } from '../../components/ui/Form'
 import { useAuth } from '../../context/AuthContext'
+import { queryKeys } from '../../lib/queryKeys'
+import { RecentActivity } from './RecentActivity'
 
 const EMPTY = { current: '', next: '', confirm: '' }
 
@@ -20,7 +22,12 @@ export function AccountSecuritySection() {
   const [form, setForm] = useState(EMPTY)
   const [error, setError] = useState(null)
   const [done, setDone] = useState(false)
-  const change = useMutation({ mutationFn: authApi.changePassword })
+  const queryClient = useQueryClient()
+  // Refresh "Recent activity" after either outcome (failed attempts are recorded too).
+  const change = useMutation({
+    mutationFn: authApi.changePassword,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.activity }),
+  })
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
 
   const onSubmit = (e) => {
@@ -90,6 +97,10 @@ export function AccountSecuritySection() {
           </Button>
         </div>
         <ErrorMessage error={logoutAll.error} />
+
+        <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
+          <RecentActivity />
+        </div>
       </CardBody>
     </Card>
   )

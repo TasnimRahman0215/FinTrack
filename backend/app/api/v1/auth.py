@@ -3,13 +3,24 @@
 Called by frontend/src/api/auth.js. Login and signup set the HttpOnly session cookie.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import client_ip, get_auth, get_db
 from app.core.config import get_settings
+from app.core.errors import TooManyRequests
 from app.core.rate_limit import RateLimiter
-from app.schemas.auth import AuthConfigOut, LoginIn, MeOut, PasswordChangeIn, SignupIn
+from app.repositories import security_event_repo
+from app.schemas.auth import (
+    AuthConfigOut,
+    LoginIn,
+    MeOut,
+    PasswordChangeIn,
+    SecurityEventOut,
+    SignupIn,
+)
 from app.services import auth_service
 from app.services.auth_service import AuthContext
 
@@ -23,6 +34,18 @@ _login_per_ip = RateLimiter(max_hits=30, window_seconds=300)
 _login_per_email_ip = RateLimiter(max_hits=10, window_seconds=300)
 _login_per_email = RateLimiter(max_hits=100, window_seconds=900)
 _signup_per_ip = RateLimiter(max_hits=10, window_seconds=3600)
+audit_log = logging.getLogger("fintrack.audit")
+
+
+def _limit(limiter: RateLimiter, key: str, *, event: str, ip: str) -> None:
+    """Apply a rate limit; log (but don't store) when it trips, so floods can't fill the DB."""
+    try:
+        limiter.hit(key)
+    except TooManyRequests:
+        audit_log.warning('{"event": "%s", "ip": "%s"}', event, ip)
+        raise
+
+
 # Changing a password re-checks the current one, so it's a password-guessing path too.
 _password_change_per_user = RateLimiter(max_hits=5, window_seconds=900)
 
@@ -51,8 +74,9 @@ def signup(
     data: SignupIn, request: Request, response: Response, db: Session = Depends(get_db)
 ) -> MeOut:
     """Create an account and a household you own, and log in."""
-    _signup_per_ip.hit(client_ip(request))
-    token, ctx = auth_service.signup(db, data, user_agent=request.headers.get("user-agent"))
+    ip = client_ip(request)
+    _limit(_signup_per_ip, ip, event="signup_rate_limited", ip=ip)
+    token, ctx = auth_service.signup(db, data, user_agent=request.headers.get("user-agent"), ip=ip)
     _set_session_cookie(response, token)
     return auth_service.me(db, ctx)
 
@@ -64,10 +88,10 @@ def login(
     """Log in with email and password."""
     ip = client_ip(request)
     email = data.email.lower()
-    _login_per_ip.hit(ip)
-    _login_per_email_ip.hit(f"{email}|{ip}")
-    _login_per_email.hit(email)
-    token, ctx = auth_service.login(db, data, user_agent=request.headers.get("user-agent"))
+    _limit(_login_per_ip, ip, event="login_rate_limited", ip=ip)
+    _limit(_login_per_email_ip, f"{email}|{ip}", event="login_rate_limited", ip=ip)
+    _limit(_login_per_email, email, event="login_rate_limited_account", ip=ip)
+    token, ctx = auth_service.login(db, data, user_agent=request.headers.get("user-agent"), ip=ip)
     _set_session_cookie(response, token)
     return auth_service.me(db, ctx)
 
@@ -82,7 +106,12 @@ def _clear_session_cookie(response: Response) -> None:
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(request: Request, response: Response, db: Session = Depends(get_db)) -> None:
     """End this session (server-side too) and clear the cookie."""
-    auth_service.logout(db, request.cookies.get(get_settings().session_cookie_name))
+    auth_service.logout(
+        db,
+        request.cookies.get(get_settings().session_cookie_name),
+        ip=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
     _clear_session_cookie(response)
 
 
@@ -100,8 +129,25 @@ def change_password(
     data: PasswordChangeIn, ctx: AuthContext = Depends(get_auth), db: Session = Depends(get_db)
 ) -> None:
     """Change your password. Every other session is signed out; this one stays signed in."""
-    _password_change_per_user.hit(str(ctx.user.id))
+    _limit(
+        _password_change_per_user,
+        str(ctx.user.id),
+        event="password_change_rate_limited",
+        ip=ctx.ip or "",
+    )
     auth_service.change_password(db, ctx, data)
+
+
+@router.get("/activity", response_model=list[SecurityEventOut])
+def activity(
+    ctx: AuthContext = Depends(get_auth), db: Session = Depends(get_db)
+) -> list[SecurityEventOut]:
+    """Your recent security activity (sign-ins, failed sign-ins, password changes...), newest
+    first, so you can spot anything you didn't do."""
+    return [
+        SecurityEventOut.model_validate(e)
+        for e in security_event_repo.recent_for_user(db, ctx.user.id)
+    ]
 
 
 @router.get("/me", response_model=MeOut)

@@ -10,6 +10,7 @@ from app.models.connection import Connection
 from app.models.household import Household
 from app.models.invite import HouseholdInvite
 from app.models.membership import HouseholdMembership
+from app.models.security_event import SecurityEvent
 from app.models.session import UserSession
 from app.models.sync_run import SyncRun
 from app.models.transaction import Transaction
@@ -22,6 +23,7 @@ __all__ = [
     "Household",
     "HouseholdInvite",
     "HouseholdMembership",
+    "SecurityEvent",
     "SyncRun",
     "Transaction",
     "User",

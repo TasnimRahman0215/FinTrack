@@ -12,6 +12,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
+from app.core.files import secure_sqlite_files
 
 # expire_on_commit=False lets services return objects after committing without extra queries.
 SessionLocal = sessionmaker(autoflush=False, expire_on_commit=False)
@@ -21,13 +22,15 @@ _engine: Engine | None = None
 def make_engine(url: str) -> Engine:
     """Create an engine, applying SQLite-specific settings when the URL is SQLite."""
     parsed = make_url(url)
+    # hide_parameters: database errors (and the tracebacks we log for failed syncs) show the SQL
+    # but never the values, which are transactions, payees and balances.
     if parsed.get_backend_name() != "sqlite":
-        return create_engine(url, pool_pre_ping=True)
+        return create_engine(url, pool_pre_ping=True, hide_parameters=True)
 
     if parsed.database and parsed.database != ":memory:":
-        Path(parsed.database).parent.mkdir(parents=True, exist_ok=True)
+        secure_sqlite_files(Path(parsed.database))
     # FastAPI runs sync endpoints in a thread pool, so connections cross threads.
-    engine = create_engine(url, connect_args={"check_same_thread": False})
+    engine = create_engine(url, connect_args={"check_same_thread": False}, hide_parameters=True)
 
     @event.listens_for(engine, "connect")
     def _sqlite_pragmas(dbapi_conn, _record):  # pragma: no cover - trivial

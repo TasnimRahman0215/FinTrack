@@ -6,7 +6,7 @@ from typing import Annotated
 from pydantic import BaseModel, StringConstraints
 
 from app.models.enums import AccountKind, Visibility
-from app.schemas.common import Cents, ORMModel
+from app.schemas.common import Cents, DbId, ORMModel
 
 AccountName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
@@ -38,7 +38,7 @@ class AccountCreate(BaseModel):
 
     name: AccountName
     kind: AccountKind = AccountKind.OTHER
-    owner_user_id: int | None = None
+    owner_user_id: DbId | None = None
     visibility: Visibility = Visibility.SHARED
     opening_balance_cents: Cents = 0
     currency: Annotated[str, StringConstraints(min_length=3, max_length=16)] = "USD"
@@ -52,7 +52,7 @@ class AccountUpdate(BaseModel):
         Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] | None
     ) = None
     kind: AccountKind | None = None
-    owner_user_id: int | None = None
+    owner_user_id: DbId | None = None
     visibility: Visibility | None = None
     is_hidden: bool | None = None
     name: AccountName | None = None  # manual accounts only

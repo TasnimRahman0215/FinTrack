@@ -6,7 +6,7 @@ Called by frontend/src/api/connections.js (Settings page).
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_auth, get_db, require_role
+from app.api.deps import PathId, get_auth, get_db, require_role
 from app.db.session import SessionLocal
 from app.models import Connection
 from app.models.enums import Role
@@ -48,7 +48,7 @@ def create_connection(
 
 @router.delete("/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_connection(
-    connection_id: int,
+    connection_id: PathId,
     ctx: AuthContext = Depends(require_role(Role.CONTRIBUTOR)),
     db: Session = Depends(get_db),
 ) -> None:

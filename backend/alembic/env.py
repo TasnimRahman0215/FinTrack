@@ -15,7 +15,9 @@ from app.db.session import make_engine
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Keep loggers that already exist (e.g. the "fintrack.audit" security log) enabled when
+    # migrations run inside an app process; fileConfig disables them by default.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

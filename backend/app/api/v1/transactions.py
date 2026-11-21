@@ -8,7 +8,7 @@ import datetime as dt
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_auth, get_db, get_scope, require_role
+from app.api.deps import OptionalQueryId, PathId, get_auth, get_db, get_scope, require_role
 from app.core.scope import Scope
 from app.models.enums import Role
 from app.repositories.transaction_repo import TransactionFilters
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/transactions", tags=["transactions"])
 @router.get("", response_model=Page[TransactionOut])
 def list_transactions(
     scope: Scope = Depends(get_scope),
-    account_id: int | None = None,
+    account_id: OptionalQueryId = None,
     start: dt.date | None = Query(None, description="Inclusive, YYYY-MM-DD"),
     end: dt.date | None = Query(None, description="Inclusive, YYYY-MM-DD"),
     q: str | None = Query(None, max_length=200, description="Search description/payee/notes"),
@@ -51,7 +51,7 @@ def create_transaction(
 
 @router.patch("/{txn_id}", response_model=TransactionOut)
 def update_transaction(
-    txn_id: int,
+    txn_id: PathId,
     data: TransactionUpdate,
     ctx: AuthContext = Depends(require_role(Role.CONTRIBUTOR)),
     db: Session = Depends(get_db),
@@ -62,7 +62,7 @@ def update_transaction(
 
 @router.delete("/{txn_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_transaction(
-    txn_id: int,
+    txn_id: PathId,
     ctx: AuthContext = Depends(require_role(Role.CONTRIBUTOR)),
     db: Session = Depends(get_db),
 ) -> None:

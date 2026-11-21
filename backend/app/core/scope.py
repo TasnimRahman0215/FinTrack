@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import AppError, NotFound
 from app.models import Account, HouseholdMembership
 from app.models.enums import Visibility
+from app.schemas.common import MAX_DB_ID
 
 
 @dataclass(frozen=True)
@@ -46,9 +47,12 @@ def parse_scope(raw: str) -> tuple[str, int | None]:
         return raw, None
     if raw.startswith("member:"):
         try:
-            return "member", int(raw.split(":", 1)[1])
+            member_id = int(raw.split(":", 1)[1])
         except ValueError:
             pass
+        else:
+            if 1 <= member_id <= MAX_DB_ID:
+                return "member", member_id
     raise AppError("scope must be 'me', 'household' or 'member:<user_id>'", code="invalid_scope")
 
 

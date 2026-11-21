@@ -33,10 +33,15 @@ docker compose up -d --build
 ```
 
 Open <http://localhost:3000>, create your account, then go to **Settings → Add SimpleFIN connection**.
+The app only listens on this machine. To use it from your phone, put HTTPS in front of it, e.g.
+`tailscale serve --bg 3000` (then open `https://<machine>.<tailnet>.ts.net` and set `COOKIE_SECURE=true`).
 
 - The backend refuses to start until `SECRET_KEY` is set in `backend/.env`.
-- Data lives in the `fintrack-data` Docker volume (SQLite). Back up `ENCRYPTION_KEY` too: without it,
-  saved connections can't be decrypted.
+- Data lives in the `fintrack-data` Docker volume (SQLite). Run it on an **encrypted disk**
+  (FileVault, LUKS): the database itself isn't encrypted.
+- Back up with `docker compose exec backend fintrack backup` (encrypted with `ENCRYPTION_KEY`;
+  restore with `fintrack restore-backup <file> --to <path>`). Keep `ENCRYPTION_KEY` in a password
+  manager, separate from the backups: without it, neither backups nor saved connections can be opened.
 - Newly synced accounts are private to whoever connected them. Share them from the **Accounts** page.
 - Beyond your own machine, serve FinTrack over HTTPS (e.g. Tailscale) and set `COOKIE_SECURE=true`.
   Give it its own hostname rather than a port next to other apps (browsers share cookies across

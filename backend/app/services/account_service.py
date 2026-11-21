@@ -16,6 +16,7 @@ from app.models import Account
 from app.models.enums import AccountKind, Role, Source, Visibility
 from app.repositories import account_repo, balance_repo, household_repo
 from app.schemas.account import AccountCreate, AccountOut, AccountUpdate
+from app.services import audit_service
 from app.services.auth_service import AuthContext
 
 # Words in an account or institution name that suggest its kind. Checked in order, first match wins.
@@ -175,6 +176,18 @@ def update(db: Session, ctx: AuthContext, account_id: int, data: AccountUpdate) 
     if edits and not perms.can_edit:
         raise Forbidden(_NOT_YOURS)
 
+    if changes_owner or changes_visibility or changes_hidden:
+        # Who can see an account changed: worth a trace (IDs and flags only, no names).
+        audit_service.record_for(
+            db,
+            ctx,
+            "account_access_changed",
+            account_id=account.id,
+            owner_from=account.owner_user_id,
+            owner_to=data.owner_user_id if changes_owner else account.owner_user_id,
+            visibility_to=data.visibility if changes_visibility else account.visibility,
+            hidden_to=data.is_hidden if changes_hidden else account.is_hidden,
+        )
     if changes_owner:
         _check_owner(db, ctx, data.owner_user_id)
         account.owner_user_id = data.owner_user_id
@@ -208,6 +221,7 @@ def delete_manual(db: Session, ctx: AuthContext, account_id: int) -> None:
         raise Forbidden(_MANAGE_ONLY)
     if account.source != Source.MANUAL:
         raise AppError("Synced accounts can't be deleted; hide them or remove the connection.")
+    audit_service.record_for(db, ctx, "account_deleted", account_id=account.id)
     db.delete(account)
     db.commit()
 

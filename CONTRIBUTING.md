@@ -13,6 +13,8 @@ and how to add a feature without fighting it.
   text) must also only describe accounts the viewer may see (`scope.visible_to`).
 - **Writes need a role:** use `Depends(require_role(Role.CONTRIBUTOR))` (or `OWNER`), and for a
   specific account `account_service.get_editable_account` (who may edit *this* account).
+- **Never log financial data** (names, payees, amounts, balances). Record security-relevant actions
+  with `audit_service.record_for(db, ctx, "event_name", some_id=...)`: IDs only.
 - **Permissions are computed by the API**, never re-derived in the frontend: responses carry flags
   such as `can_edit`, `can_manage` and `editable`.
 - **Sync never overwrites user fields.** Provider columns (name, balance, description...) are refreshed;

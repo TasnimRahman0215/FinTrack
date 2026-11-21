@@ -5,8 +5,9 @@ or `scope = Depends(get_scope)`, and FastAPI runs these before the endpoint.
 """
 
 from collections.abc import Callable
+from typing import Annotated
 
-from fastapi import Depends, Query, Request
+from fastapi import Depends, Path, Query, Request
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -14,10 +15,24 @@ from app.core.errors import Forbidden, Unauthorized
 from app.core.scope import Scope, resolve_scope
 from app.db.session import get_db
 from app.models.enums import Role
+from app.schemas.common import MAX_DB_ID
 from app.services import auth_service
 from app.services.auth_service import AuthContext
 
-__all__ = ["get_db", "get_auth", "require_role", "get_scope", "get_scope_with_hidden", "client_ip"]
+# Path / query IDs bounded to what the database can store (see schemas/common.MAX_DB_ID).
+PathId = Annotated[int, Path(ge=1, le=MAX_DB_ID)]
+OptionalQueryId = Annotated[int | None, Query(ge=1, le=MAX_DB_ID)]
+
+__all__ = [
+    "get_db",
+    "get_auth",
+    "require_role",
+    "get_scope",
+    "get_scope_with_hidden",
+    "client_ip",
+    "PathId",
+    "OptionalQueryId",
+]
 
 
 def get_auth(request: Request, db: Session = Depends(get_db)) -> AuthContext:
@@ -28,6 +43,8 @@ def get_auth(request: Request, db: Session = Depends(get_db)) -> AuthContext:
     ctx = auth_service.resolve_session(db, token)
     if ctx is None:
         raise Unauthorized("Your session has expired. Please sign in again.")
+    ctx.ip = client_ip(request)
+    ctx.user_agent = request.headers.get("user-agent")
     return ctx
 
 

@@ -24,6 +24,24 @@ export const CONNECTION_STATUS = {
   reauth_required: { label: 'Needs reconnect', tone: 'amber' },
 }
 
+// "Recent activity" entries (backend/app/services/audit_service.py). `alert` marks events the
+// user should look at twice if they don't recognise them.
+export const SECURITY_EVENT = {
+  signup: { label: 'Account created' },
+  login: { label: 'Signed in' },
+  login_failed: { label: 'Failed sign-in attempt', alert: true },
+  logout: { label: 'Signed out' },
+  logout_all: { label: 'Signed out everywhere' },
+  password_changed: { label: 'Password changed', alert: true },
+  password_change_failed: { label: 'Wrong current password entered', alert: true },
+  password_reset: { label: 'Password reset by an administrator', alert: true },
+  connection_added: { label: 'Bank connection added' },
+  connection_removed: { label: 'Bank connection removed', alert: true },
+  account_access_changed: { label: 'Account owner, visibility or hidden changed' },
+  account_deleted: { label: 'Account deleted', alert: true },
+  household_renamed: { label: 'Household renamed' },
+}
+
 export const SYNC_STATUS = {
   running: { label: 'Running', tone: 'slate' },
   success: { label: 'Success', tone: 'green' },

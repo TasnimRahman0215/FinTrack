@@ -41,6 +41,7 @@ All money is integer cents.
 | `balance_snapshots` | One balance per account per day (for net-worth history) |
 | `transactions` | `source` (simplefin/manual/import), unique `(account_id, provider_txn_id)`, `raw_json` kept |
 | `sync_runs` | History of every sync, with counts and provider errors |
+| `security_events` | Sign-ins, failed sign-ins, password and access changes: IDs, IP and browser only, kept a year |
 
 ## Scope (who sees what)
 
@@ -149,6 +150,35 @@ scheduler (every 30 min: syncs connections not synced in SYNC_INTERVAL_HOURS)  o
 - nginx (unprivileged) sends a strict Content-Security-Policy, `X-Frame-Options: DENY`,
   `X-Content-Type-Options`, `Referrer-Policy` and `Permissions-Policy`. If the API is on another
   origin, add it to `CSP_CONNECT_SRC`.
+- **Data at rest.** The database holds every transaction unencrypted, so:
+  - run FinTrack on an encrypted disk (FileVault on macOS, LUKS on Linux). This is required, not
+    optional, for a server holding a household's finances;
+  - the database, its `-wal`/`-shm` files and backups are created owner-only (`0600`, new folders
+    `0700`; the container also runs with `umask 077`), and older world-readable files are
+    tightened at startup;
+  - `fintrack backup` encrypts with `ENCRYPTION_KEY` by default (Fernet: AES + HMAC, so a modified
+    backup is refused); the unencrypted snapshot only exists in memory. `fintrack restore-backup`
+    decrypts and integrity-checks it. `--plaintext` is only for tools that encrypt themselves
+    (e.g. restic). Keep `ENCRYPTION_KEY` somewhere other than the backups.
+- **Logs never contain financial data.** The database engine uses `hide_parameters`, so errors
+  show SQL but not values; sync errors log only connection IDs.
+- **Security event log.** Sign-ins, failed sign-ins (also for unknown emails, without the email, so
+  timing reveals nothing), sign-outs, password changes and resets, bank connections added or
+  removed, account owner/visibility/hidden changes, account deletions and household renames are
+  stored in `security_events` and written as JSON lines to the `fintrack.audit` logger. Each user
+  sees their own recent activity in Settings. Rate-limit hits are logged only, so a flood of
+  requests can't fill the database.
+- **Error responses** say which field failed and why, but never echo the submitted value
+  (passwords, tokens). IDs outside the database's integer range are rejected with a 4xx.
+- **Containers** run read-only with all Linux capabilities dropped and `no-new-privileges`; only
+  the data volume and small `tmpfs` areas are writable. The backend runs as an unprivileged user,
+  nginx as the unprivileged `nginx` user.
+- **Network.** The web app listens on `127.0.0.1` only by default, since it speaks plain HTTP. Use
+  HTTPS (Tailscale serve, Caddy) to reach it from other devices. `FRONTEND_BIND=0.0.0.0` exposes
+  plain HTTP to your whole network and is not advised.
+- **Supply chain.** Base images are pinned by digest; `uv.lock` and `package-lock.json` pin every
+  dependency with hashes. Dependabot (`.github/dependabot.yml`) proposes updates weekly and for
+  security advisories.
 - `ALLOW_SIGNUP=false` closes signups after the first account. While signups are open, anyone who
   can reach the server can create an account (in a separate household) and can find out whether an
   email is registered, so close them once your household has joined.

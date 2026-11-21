@@ -18,7 +18,7 @@ from app.models.enums import Role
 from app.providers.registry import get_provider
 from app.repositories import connection_repo, household_repo
 from app.schemas.connection import ConnectionOut
-from app.services import sync_service
+from app.services import audit_service, sync_service
 from app.services.auth_service import AuthContext
 
 # Shown instead of the real error to members who didn't add the connection: provider messages
@@ -117,6 +117,10 @@ def create(
         credentials_enc=security.encrypt(credentials),
     )
     db.add(connection)
+    db.flush()
+    audit_service.record_for(
+        db, ctx, "connection_added", connection_id=connection.id, provider=provider.name
+    )
     db.commit()
     return connection
 
@@ -129,5 +133,12 @@ def delete(db: Session, ctx: AuthContext, connection_id: int) -> None:
     if not can_manage(db, ctx, connection):
         # Deleting cascades to every account it synced, including members' private ones.
         raise Forbidden("Only the person who added this connection can remove it.")
+    audit_service.record_for(
+        db,
+        ctx,
+        "connection_removed",
+        connection_id=connection.id,
+        accounts_removed=len(connection.accounts),
+    )
     db.delete(connection)
     db.commit()

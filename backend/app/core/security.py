@@ -94,7 +94,7 @@ def generate_encryption_key() -> str:
     return Fernet.generate_key().decode()
 
 
-def _fernet() -> Fernet:
+def fernet() -> Fernet:
     """Build the cipher from ENCRYPTION_KEY, with errors that explain how to fix the key."""
     key = get_settings().encryption_key
     if not key:
@@ -113,16 +113,16 @@ def _fernet() -> Fernet:
 
 def check_encryption_key() -> None:
     """Fails fast on a bad ENCRYPTION_KEY, before a single-use setup token is spent."""
-    _fernet()
+    fernet()
 
 
 def encrypt(value: str) -> str:
-    return _fernet().encrypt(value.encode()).decode()
+    return fernet().encrypt(value.encode()).decode()
 
 
 def decrypt(value: str) -> str:
     try:
-        return _fernet().decrypt(value.encode()).decode()
+        return fernet().decrypt(value.encode()).decode()
     except InvalidToken as exc:
         raise ConfigError(
             "Stored credentials can't be decrypted. Did ENCRYPTION_KEY change?"

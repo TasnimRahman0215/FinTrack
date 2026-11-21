@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.models import Account, Transaction
+from app.schemas.common import MAX_DB_ID
 
 _CHUNK = 500  # keep IN (...) lists well under database parameter limits
 
@@ -35,9 +36,12 @@ def encode_cursor(date: dt.date, txn_id: int) -> str:
 def decode_cursor(cursor: str) -> tuple[dt.date, int]:
     try:
         date_s, id_s = base64.urlsafe_b64decode(cursor.encode()).decode().split("|")
-        return dt.date.fromisoformat(date_s), int(id_s)
+        date, txn_id = dt.date.fromisoformat(date_s), int(id_s)
     except (ValueError, UnicodeDecodeError) as exc:
         raise AppError("Invalid cursor", code="invalid_cursor") from exc
+    if not 0 <= txn_id <= MAX_DB_ID:
+        raise AppError("Invalid cursor", code="invalid_cursor")
+    return date, txn_id
 
 
 def _escape_like(value: str) -> str:

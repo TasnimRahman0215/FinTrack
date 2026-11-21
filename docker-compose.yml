@@ -6,6 +6,14 @@
 # BACKEND_PORT and POSTGRES_PASSWORD are read by this file, so they go in the .env next to it
 # (see .env.example). A DATABASE_URL in backend/.env is ignored in Docker: the line below wins.
 
+# Hardening shared by the app containers: a read-only filesystem (only the data volume and a
+# small /tmp are writable), no Linux capabilities, and no privilege escalation. Even with a
+# code-execution bug, nothing could modify the app or gain more rights inside the container.
+x-hardened: &hardened
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
 services:
   backend:
     build: ./backend
@@ -14,6 +22,8 @@ services:
     environment:
       # Set DATABASE_URL in ./.env (not backend/.env) to use Postgres.
       DATABASE_URL: ${DATABASE_URL:-sqlite:////data/fintrack.db}
+    <<: *hardened
+    tmpfs: ["/tmp:size=64m,mode=1777"]
     volumes:
       - fintrack-data:/data
     ports:
@@ -24,13 +34,21 @@ services:
   frontend:
     build: ./frontend
     image: fintrack-frontend:local
+    <<: *hardened
+    # nginx writes its rendered config and temp files at startup; give it small private tmpfs.
+    tmpfs:
+      - "/tmp:size=64m,mode=1777"
+      - "/etc/nginx/conf.d:size=1m,mode=1777"
     environment:
       BACKEND_URL: http://backend:8000
       # Behind another reverse proxy (Caddy, Tailscale serve...)? List its address(es) in ./.env
       # so login rate limits see each user's real IP. Empty = browsers connect directly.
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
     ports:
-      - "${FRONTEND_PORT:-3000}:8080"
+      # Only this machine by default: the app speaks plain HTTP, so passwords and cookies would
+      # cross your network unencrypted. Reach it from other devices through HTTPS (Tailscale serve,
+      # Caddy...). FRONTEND_BIND=0.0.0.0 exposes plain HTTP to your whole network: not advised.
+      - "${FRONTEND_BIND:-127.0.0.1}:${FRONTEND_PORT:-3000}:8080"
     depends_on:
       backend:
         condition: service_healthy
@@ -47,6 +65,7 @@ services:
       POSTGRES_USER: fintrack
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintrack}
       POSTGRES_DB: fintrack
+    security_opt: ["no-new-privileges:true"]
     volumes:
       - fintrack-pg:/var/lib/postgresql/data
     restart: unless-stopped
@@ -61,7 +80,9 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-sqlite:////data/fintrack.db}
       RUN_SCHEDULER: "true"
-    command: ["python", "-m", "app.worker"]
+    command: ["sh", "-c", "umask 077 && exec python -m app.worker"]
+    <<: *hardened
+    tmpfs: ["/tmp:size=64m,mode=1777"]
     volumes:
       - fintrack-data:/data
     depends_on:

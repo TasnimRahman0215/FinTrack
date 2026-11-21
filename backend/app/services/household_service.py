@@ -9,6 +9,7 @@ from app.core.errors import NotFound
 from app.models.enums import Role
 from app.repositories import household_repo
 from app.schemas.household import HouseholdOut, HouseholdUpdate, MemberOut
+from app.services import audit_service
 from app.services.auth_service import AuthContext
 
 
@@ -34,5 +35,6 @@ def update_household(db: Session, ctx: AuthContext, data: HouseholdUpdate) -> Ho
     if household is None:
         raise NotFound("Household not found.")
     household.name = data.name
+    audit_service.record_for(db, ctx, "household_renamed")
     db.commit()
     return get_household(db, ctx)

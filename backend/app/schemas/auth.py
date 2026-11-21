@@ -1,5 +1,6 @@
 """Auth request/response bodies for api/v1/auth.py."""
 
+from datetime import datetime
 from typing import Annotated
 
 from pydantic import BaseModel, EmailStr, Field, StringConstraints
@@ -44,6 +45,15 @@ class MeOut(BaseModel):
     user: UserOut
     household: HouseholdBrief | None
     role: Role | None
+
+
+class SecurityEventOut(ORMModel):
+    """One entry of "Recent activity" (GET /auth/activity). Details stay server-side."""
+
+    event: str
+    created_at: datetime
+    ip: str | None
+    user_agent: str | None
 
 
 class AuthConfigOut(BaseModel):

@@ -5,7 +5,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field, StringConstraints
 
-from app.schemas.common import Cents, ORMModel
+from app.schemas.common import Cents, DbId, ORMModel
 
 Text255 = Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)]
 
@@ -27,7 +27,7 @@ class TransactionOut(ORMModel):
 
 
 class TransactionCreate(BaseModel):
-    account_id: int
+    account_id: DbId
     date: dt.date
     amount_cents: Annotated[Cents, Field(description="Negative = money out, positive = money in")]
     description: Annotated[
@@ -40,7 +40,7 @@ class TransactionCreate(BaseModel):
 class TransactionUpdate(BaseModel):
     """Only the fields that are sent are changed."""
 
-    account_id: int | None = None
+    account_id: DbId | None = None
     date: dt.date | None = None
     amount_cents: Cents | None = None
     description: (

@@ -6,6 +6,7 @@ export const queryKeys = {
   household: ['household'],
   connections: ['connections'],
   syncRuns: ['sync-runs'],
+  activity: ['security-activity'],
   accounts: (scope, opts = {}) => ['accounts', scope, opts],
   transactions: (scope, filters = {}) => ['transactions', scope, filters],
   summary: (scope) => ['summary', scope],

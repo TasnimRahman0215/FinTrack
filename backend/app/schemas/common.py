@@ -9,6 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field
 MAX_CENTS = 10**13
 Cents = Annotated[int, Field(ge=-MAX_CENTS, le=MAX_CENTS)]
 
+# Largest ID the database can store (signed 64-bit). Bigger numbers from clients would otherwise
+# reach the database driver and crash the request with an OverflowError.
+MAX_DB_ID = 2**63 - 1
+DbId = Annotated[int, Field(ge=1, le=MAX_DB_ID)]
+
 
 class ORMModel(BaseModel):
     """Base for responses built straight from SQLAlchemy objects (`Model.model_validate(row)`)."""
